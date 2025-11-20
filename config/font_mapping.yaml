@@ -1,0 +1,54 @@
+# Web字体到Word字体的映射表
+# 将常见的Web字体映射到Word支持的字体
+
+# Sans-serif 字体
+Arial: "Arial"
+Helvetica: "Arial"
+"Helvetica Neue": "Arial"
+Verdana: "Verdana"
+Tahoma: "Tahoma"
+"Trebuchet MS": "Trebuchet MS"
+"Segoe UI": "Segoe UI"
+Calibri: "Calibri"
+"Lucida Grande": "Lucida Sans Unicode"
+"Lucida Sans": "Lucida Sans Unicode"
+
+# Serif 字体
+"Times New Roman": "Times New Roman"
+Times: "Times New Roman"
+Georgia: "Georgia"
+Garamond: "Garamond"
+Palatino: "Palatino Linotype"
+"Palatino Linotype": "Palatino Linotype"
+"Book Antiqua": "Book Antiqua"
+Cambria: "Cambria"
+
+# Monospace 字体
+"Courier New": "Courier New"
+Courier: "Courier New"
+Monaco: "Courier New"
+Consolas: "Consolas"
+"Lucida Console": "Lucida Console"
+Menlo: "Consolas"
+monospace: "Courier New"
+
+# 中文字体
+"Microsoft YaHei": "Microsoft YaHei"
+"微软雅黑": "Microsoft YaHei"
+SimSun: "SimSun"
+"宋体": "SimSun"
+SimHei: "SimHei"
+"黑体": "SimHei"
+KaiTi: "KaiTi"
+"楷体": "KaiTi"
+FangSong: "FangSong"
+"仿宋": "FangSong"
+"PingFang SC": "Microsoft YaHei"
+"Hiragino Sans GB": "Microsoft YaHei"
+
+# 通用字体族
+sans-serif: "Arial"
+serif: "Times New Roman"
+
+# 默认字体（找不到映射时使用）
+default: "Calibri"

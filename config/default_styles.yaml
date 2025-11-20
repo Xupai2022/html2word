@@ -1,0 +1,143 @@
+# HTML元素默认样式（基于浏览器默认样式）
+# 参考：https://www.w3.org/TR/CSS2/sample.html
+
+body:
+  margin: 8px
+  font-family: "Times New Roman"
+  font-size: 16px
+  color: "#000000"
+  line-height: 1.2
+
+# 标题
+h1:
+  font-size: 2em
+  font-weight: bold
+  margin-top: 0.67em
+  margin-bottom: 0.67em
+  display: block
+
+h2:
+  font-size: 1.5em
+  font-weight: bold
+  margin-top: 0.83em
+  margin-bottom: 0.83em
+  display: block
+
+h3:
+  font-size: 1.17em
+  font-weight: bold
+  margin-top: 1em
+  margin-bottom: 1em
+  display: block
+
+h4:
+  font-size: 1em
+  font-weight: bold
+  margin-top: 1.33em
+  margin-bottom: 1.33em
+  display: block
+
+h5:
+  font-size: 0.83em
+  font-weight: bold
+  margin-top: 1.67em
+  margin-bottom: 1.67em
+  display: block
+
+h6:
+  font-size: 0.67em
+  font-weight: bold
+  margin-top: 2.33em
+  margin-bottom: 2.33em
+  display: block
+
+# 段落
+p:
+  margin-top: 1em
+  margin-bottom: 1em
+  display: block
+
+div:
+  display: block
+
+# 文本样式
+strong:
+  font-weight: bold
+
+b:
+  font-weight: bold
+
+em:
+  font-style: italic
+
+i:
+  font-style: italic
+
+u:
+  text-decoration: underline
+
+s:
+  text-decoration: line-through
+
+strike:
+  text-decoration: line-through
+
+# 列表
+ul:
+  margin-top: 1em
+  margin-bottom: 1em
+  margin-left: 40px
+  display: block
+  list-style-type: disc
+
+ol:
+  margin-top: 1em
+  margin-bottom: 1em
+  margin-left: 40px
+  display: block
+  list-style-type: decimal
+
+li:
+  display: list-item
+
+# 表格
+table:
+  display: table
+  border-collapse: separate
+  border-spacing: 2px
+
+tr:
+  display: table-row
+
+td:
+  display: table-cell
+  padding: 1px
+
+th:
+  display: table-cell
+  font-weight: bold
+  text-align: center
+  padding: 1px
+
+# 其他
+hr:
+  margin-top: 0.5em
+  margin-bottom: 0.5em
+  border-width: 1px
+  border-style: solid
+  border-color: "#000000"
+
+a:
+  color: "#0000EE"
+  text-decoration: underline
+
+blockquote:
+  margin-left: 40px
+  margin-right: 40px
+
+pre:
+  font-family: "Courier New"
+  white-space: pre
+
+code:
+  font-family: "Courier New"

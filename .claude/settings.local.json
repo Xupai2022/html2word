@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git config:*)",
+      "Bash(git show-ref:*)",
+      "Bash(python -m html2word:*)",
+      "Bash(python:*)",
+      "Bash(mv:*)",
+      "Bash(pip install:*)",
+      "Bash(html2word:*)",
+      "Bash(git add:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

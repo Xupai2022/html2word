@@ -1,0 +1,296 @@
+"""
+Style mapper - maps CSS styles to Word styles.
+
+Converts computed CSS styles to python-docx formatting.
+"""
+
+import logging
+from typing import Optional, Dict, Any
+from docx.shared import Pt, RGBColor, Inches
+from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_UNDERLINE
+from docx.enum.table import WD_ALIGN_VERTICAL
+
+from html2word.utils.colors import ColorConverter
+from html2word.utils.fonts import FontMapper
+from html2word.utils.units import UnitConverter
+
+logger = logging.getLogger(__name__)
+
+
+class StyleMapper:
+    """Maps CSS styles to Word formatting."""
+
+    def __init__(self):
+        """Initialize style mapper."""
+        self.font_mapper = FontMapper()
+
+    def apply_run_style(self, run, styles: Dict[str, Any]):
+        """
+        Apply text run styles.
+
+        Args:
+            run: python-docx Run object
+            styles: Computed CSS styles
+        """
+        # Font family
+        if 'font-family' in styles:
+            font_name = self.font_mapper.map_font(styles['font-family'])
+            run.font.name = font_name
+
+        # Font size
+        if 'font-size' in styles:
+            try:
+                font_size_pt = self._get_font_size_pt(styles['font-size'])
+                if font_size_pt:
+                    run.font.size = Pt(font_size_pt)
+            except Exception as e:
+                logger.warning(f"Error setting font size: {e}")
+
+        # Font weight (bold)
+        if 'font-weight' in styles:
+            weight = styles.get('font-weight', 400)
+            if isinstance(weight, str):
+                try:
+                    weight = int(weight)
+                except:
+                    weight = 700 if weight == 'bold' else 400
+            run.font.bold = weight >= 600
+
+        # Font style (italic)
+        if 'font-style' in styles:
+            run.font.italic = styles['font-style'] in ('italic', 'oblique')
+
+        # Color
+        if 'color' in styles:
+            rgb_color = ColorConverter.to_rgb_color(styles['color'])
+            if rgb_color:
+                run.font.color.rgb = rgb_color
+
+        # Text decoration
+        if 'text-decoration' in styles:
+            decoration = styles['text-decoration']
+            if 'underline' in decoration:
+                run.font.underline = WD_UNDERLINE.SINGLE
+            if 'line-through' in decoration:
+                run.font.strike = True
+
+        # Background color (highlighting)
+        if 'background-color' in styles:
+            # Note: python-docx has limited background color support
+            # We can use highlighting, but it has limited colors
+            pass
+
+    def apply_paragraph_style(self, paragraph, styles: Dict[str, Any], box_model=None):
+        """
+        Apply paragraph styles.
+
+        Args:
+            paragraph: python-docx Paragraph object
+            styles: Computed CSS styles
+            box_model: BoxModel object (optional)
+        """
+        fmt = paragraph.paragraph_format
+
+        # Text alignment
+        if 'text-align' in styles:
+            alignment = self._map_text_align(styles['text-align'])
+            if alignment is not None:
+                fmt.alignment = alignment
+
+        # Line height
+        if 'line-height' in styles:
+            line_height = styles['line-height']
+            try:
+                if isinstance(line_height, (int, float)):
+                    # Multiplier
+                    fmt.line_spacing = float(line_height)
+                else:
+                    # Try to parse as pt
+                    pt_value = UnitConverter.to_pt(str(line_height))
+                    if pt_value:
+                        fmt.line_spacing = Pt(pt_value)
+            except:
+                pass
+
+        # Margins (spacing)
+        if box_model:
+            # Space before (margin-top)
+            if box_model.margin.top > 0:
+                fmt.space_before = Pt(box_model.margin.top)
+
+            # Space after (margin-bottom)
+            if box_model.margin.bottom > 0:
+                fmt.space_after = Pt(box_model.margin.bottom)
+
+            # Left indent (margin-left)
+            if box_model.margin.left > 0:
+                fmt.left_indent = Pt(box_model.margin.left)
+
+            # Right indent (margin-right)
+            if box_model.margin.right > 0:
+                fmt.right_indent = Pt(box_model.margin.right)
+
+        # First line indent
+        if 'text-indent' in styles:
+            try:
+                indent_pt = UnitConverter.to_pt(styles['text-indent'])
+                if indent_pt != 0:
+                    fmt.first_line_indent = Pt(indent_pt)
+            except:
+                pass
+
+        # Background color (shading)
+        if 'background-color' in styles:
+            try:
+                rgb_color = ColorConverter.to_rgb_color(styles['background-color'])
+                if rgb_color:
+                    from docx.oxml import parse_xml
+                    from docx.oxml.ns import nsdecls
+
+                    # Add shading element
+                    shd = parse_xml(
+                        f'<w:shd {nsdecls("w")} w:fill="{ColorConverter.to_hex(styles["background-color"])[1:]}"/>'
+                    )
+                    paragraph._element.get_or_add_pPr().append(shd)
+            except Exception as e:
+                logger.warning(f"Error setting paragraph background: {e}")
+
+    def apply_table_cell_style(self, cell, styles: Dict[str, Any], box_model=None):
+        """
+        Apply table cell styles.
+
+        Args:
+            cell: python-docx Cell object
+            styles: Computed CSS styles
+            box_model: BoxModel object (optional)
+        """
+        # Vertical alignment
+        if 'vertical-align' in styles:
+            v_align = self._map_vertical_align(styles['vertical-align'])
+            if v_align is not None:
+                cell.vertical_alignment = v_align
+
+        # Background color
+        if 'background-color' in styles:
+            try:
+                from docx.oxml import parse_xml
+                from docx.oxml.ns import nsdecls
+
+                hex_color = ColorConverter.to_hex(styles['background-color'])
+                if hex_color:
+                    shd = parse_xml(
+                        f'<w:shd {nsdecls("w")} w:fill="{hex_color[1:]}"/>'
+                    )
+                    cell._element.get_or_add_tcPr().append(shd)
+            except Exception as e:
+                logger.warning(f"Error setting cell background: {e}")
+
+        # Cell borders
+        if box_model and box_model.border.has_border():
+            self._apply_cell_borders(cell, box_model.border)
+
+        # Cell padding (margins)
+        if box_model:
+            # Note: python-docx cell margin support is limited
+            pass
+
+    def _apply_cell_borders(self, cell, border):
+        """Apply borders to table cell."""
+        try:
+            from docx.oxml import parse_xml
+            from docx.oxml.ns import nsdecls
+
+            tc = cell._element
+            tcPr = tc.get_or_add_tcPr()
+
+            # Build border elements for each side
+            border_elements = []
+
+            # Process each side
+            for side_name, border_edge in [('top', border.top), ('left', border.left),
+                                            ('bottom', border.bottom), ('right', border.right)]:
+                if border_edge.width > 0 and border_edge.style != 'none':
+                    # Convert pt to eighths of a point
+                    sz = int(border_edge.width * 8)
+
+                    # Map CSS border style to Word border style
+                    word_style = self._map_border_style(border_edge.style)
+
+                    # Get color
+                    color = ColorConverter.to_hex(border_edge.color)
+                    if color:
+                        color = color[1:]  # Remove #
+                    else:
+                        color = '000000'  # Default to black
+
+                    # Add border element
+                    border_elements.append(
+                        f'<w:{side_name} w:val="{word_style}" w:sz="{sz}" w:color="{color}"/>'
+                    )
+
+            # Only add tcBorders if we have at least one border
+            if border_elements:
+                tcBorders_xml = f'''
+                    <w:tcBorders {nsdecls("w")}>
+                        {chr(10).join(border_elements)}
+                    </w:tcBorders>
+                '''
+                tcBorders = parse_xml(tcBorders_xml)
+                tcPr.append(tcBorders)
+
+        except Exception as e:
+            logger.warning(f"Error applying cell borders: {e}")
+
+    def _map_border_style(self, css_style: str) -> str:
+        """
+        Map CSS border style to Word border style.
+
+        Args:
+            css_style: CSS border style (solid, dashed, dotted, double, etc.)
+
+        Returns:
+            Word border style name
+        """
+        style_map = {
+            'solid': 'single',
+            'dashed': 'dashed',
+            'dotted': 'dotted',
+            'double': 'double',
+            'groove': 'threeDEngrave',
+            'ridge': 'threeDEmboss',
+            'inset': 'inset',
+            'outset': 'outset',
+            'none': 'none',
+            'hidden': 'none'
+        }
+        return style_map.get(css_style.lower(), 'single')
+
+    def _get_font_size_pt(self, font_size) -> Optional[float]:
+        """Get font size in pt."""
+        if isinstance(font_size, (int, float)):
+            return float(font_size)
+
+        try:
+            return UnitConverter.to_pt(str(font_size))
+        except:
+            return None
+
+    def _map_text_align(self, css_align: str) -> Optional[WD_ALIGN_PARAGRAPH]:
+        """Map CSS text-align to Word alignment."""
+        align_map = {
+            'left': WD_ALIGN_PARAGRAPH.LEFT,
+            'center': WD_ALIGN_PARAGRAPH.CENTER,
+            'right': WD_ALIGN_PARAGRAPH.RIGHT,
+            'justify': WD_ALIGN_PARAGRAPH.JUSTIFY,
+        }
+        return align_map.get(css_align.lower())
+
+    def _map_vertical_align(self, css_align: str) -> Optional[WD_ALIGN_VERTICAL]:
+        """Map CSS vertical-align to Word vertical alignment."""
+        align_map = {
+            'top': WD_ALIGN_VERTICAL.TOP,
+            'middle': WD_ALIGN_VERTICAL.CENTER,
+            'center': WD_ALIGN_VERTICAL.CENTER,
+            'bottom': WD_ALIGN_VERTICAL.BOTTOM,
+        }
+        return align_map.get(css_align.lower())
