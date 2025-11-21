@@ -105,7 +105,12 @@ class DocumentBuilder:
                 self._convert_grid_to_table_smart(node)
             elif self._should_wrap_in_styled_table(node):
                 # Has background/border - wrap in table to preserve styling
-                self._wrap_div_in_styled_table(node)
+                # But skip if it's a root layout container (like .container)
+                if self._is_root_layout_container(node):
+                    # Skip wrapping for root layout containers
+                    self._process_children(node)
+                else:
+                    self._wrap_div_in_styled_table(node)
             elif self._should_treat_div_as_paragraph(node):
                 # Only inline content - treat as paragraph
                 self.paragraph_builder.build_paragraph(node)
@@ -278,13 +283,20 @@ class DocumentBuilder:
         # Check for important visual styles
         styles = node.computed_styles
 
-        # Background color - check if it's a meaningful color (not white/transparent)
-        has_background = False
-        bg_color = styles.get('background-color', '')
+        # Check background property first (for gradients)
+        has_non_white_bg = False
+        bg_prop = styles.get('background', '')
+        if bg_prop and bg_prop not in ('', 'none', 'transparent'):
+            bg_lower = bg_prop.lower()
+            # Gradient always counts as meaningful background
+            if 'gradient' in bg_lower:
+                has_non_white_bg = True
 
+        # Check background-color
+        bg_color = styles.get('background-color', '')
         if bg_color and bg_color not in ('', 'transparent', 'rgba(0, 0, 0, 0)', 'rgba(0,0,0,0)'):
             bg_lower = bg_color.lower()
-            # Check if it's not white or very light color
+            # Check if it's white/very light (likely just layout container)
             is_white = (
                 bg_lower in ('#fff', '#ffffff', 'white', 'rgb(255,255,255)', 'rgb(255, 255, 255)') or
                 bg_lower.startswith('#fff') or
@@ -292,18 +304,7 @@ class DocumentBuilder:
             )
 
             if not is_white:
-                has_background = True
-
-        # Also check background property (in case background-color wasn't set)
-        bg_prop = styles.get('background', '')
-        if bg_prop and bg_prop not in ('', 'none', 'transparent'):
-            bg_lower = bg_prop.lower()
-            # Check if gradient
-            if 'gradient' in bg_lower:
-                has_background = True
-            # Check if not white
-            elif bg_lower not in ('white', '#fff', '#ffffff', 'rgb(255,255,255)', 'rgb(255, 255, 255)'):
-                has_background = True
+                has_non_white_bg = True
 
         # Borders - only count if it's a full border or prominent styling
         has_border = False
@@ -316,19 +317,15 @@ class DocumentBuilder:
         if border_count >= 3:
             has_border = True
 
-        # Box shadow - only meaningful if combined with non-white background or border
-        # Shadow on plain white background doesn't need table wrapping
+        # Box shadow
         has_shadow = 'box-shadow' in styles and styles['box-shadow'] not in ('none', '')
 
-        # Only wrap if:
-        # - Has non-white background, OR
-        # - Has significant border, OR
-        # - Has shadow + (non-white background OR border)
-        # Don't wrap for shadow alone on white background
-        if has_shadow and not has_background and not has_border:
-            return False  # Shadow alone on white background - don't wrap
-
-        return has_background or has_border or has_shadow
+        # Only wrap if has MEANINGFUL visual styling:
+        # - Non-white background (color or gradient), OR
+        # - Significant border, OR
+        # - Box shadow (even on white background)
+        # White background alone is layout, not styling
+        return has_non_white_bg or has_border or has_shadow
 
     def _convert_grid_to_table(self, grid_node: DOMNode):
         """
@@ -571,6 +568,57 @@ class DocumentBuilder:
 
         # Default
         return min(3, num_items)
+
+    def _is_root_layout_container(self, node: DOMNode) -> bool:
+        """
+        Check if node is a root layout container (like .container) that should not be wrapped.
+
+        Args:
+            node: DOM node
+
+        Returns:
+            True if it's a root layout container
+        """
+        # Check if parent is body or a direct child of a major container
+        is_child_of_body = node.parent and node.parent.tag == 'body'
+
+        # Check styles:
+        # - Has white/transparent background
+        # - Has box-shadow (likely for visual separation, not content styling)
+        # - Likely has max-width, margin: 0 auto (centered layout)
+        if not node.computed_styles:
+            return False
+
+        styles = node.computed_styles
+
+        # Check if it has white/transparent background
+        bg_color = styles.get('background-color', '')
+        bg_prop = styles.get('background', '')
+
+        has_white_bg = False
+        if bg_color:
+            bg_lower = bg_color.lower()
+            has_white_bg = bg_lower in ('#fff', '#ffffff', 'white', 'rgb(255,255,255)', 'rgb(255, 255, 255)')
+        elif bg_prop:
+            bg_lower = bg_prop.lower()
+            has_white_bg = bg_lower in ('white', '#fff', '#ffffff')
+
+        # If not white background, it's not a layout container
+        if not has_white_bg:
+            return False
+
+        # Check if has box-shadow (layout visual effect)
+        has_shadow = 'box-shadow' in styles and styles['box-shadow'] not in ('none', '')
+
+        # Check if has max-width (typical of layout containers)
+        has_max_width = 'max-width' in styles
+
+        # It's a root layout container if:
+        # 1. Direct child of body (or very close to root)
+        # 2. Has white background
+        # 3. Has box-shadow (for visual separation)
+        # 4. Probably has max-width for centering
+        return is_child_of_body and has_shadow and (has_max_width or True)
 
     def save(self, output_path: str):
         """
