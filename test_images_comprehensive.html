@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>图片测试 - 全面覆盖各种图片场景</title>
+    <style>
+        body {
+            font-family: "Microsoft YaHei", "SimSun", serif;
+            line-height: 1.6;
+            padding: 20px;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .test-section {
+            border: 1px solid #ddd;
+            padding: 20px;
+            margin: 20px 0;
+            background: #f9f9f9;
+        }
+
+        .test-section h3 {
+            color: #333;
+            border-bottom: 2px solid #4CAF50;
+            padding-bottom: 10px;
+        }
+
+        /* 图片样式 */
+        .responsive-img {
+            max-width: 100%;
+            height: auto;
+        }
+
+        .img-with-border {
+            border: 3px solid #ff6b6b;
+            border-radius: 8px;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+        }
+
+        .img-float-left {
+            float: left;
+            margin: 0 20px 20px 0;
+            width: 200px;
+        }
+
+        .img-float-right {
+            float: right;
+            margin: 0 0 20px 20px;
+            width: 200px;
+        }
+
+        .img-circle {
+            border-radius: 50%;
+            border: 5px solid #3498db;
+        }
+
+        /* 图文混排 */
+        .figure-container {
+            text-align: center;
+            margin: 20px 0;
+        }
+
+        .figure-container img {
+            display: block;
+            margin: 0 auto;
+        }
+
+        .fig-caption {
+            font-style: italic;
+            color: #666;
+            margin-top: 10px;
+            font-size: 14px;
+        }
+
+        /* 多图片网格 */
+        .image-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin: 20px 0;
+        }
+
+        .image-grid img {
+            width: 100%;
+            height: 150px;
+            object-fit: cover;
+            border-radius: 8px;
+        }
+
+        /* 图片链接 */
+        .image-link {
+            display: inline-block;
+            transition: transform 0.3s;
+        }
+
+        .image-link:hover {
+            transform: scale(1.05);
+        }
+
+        /* flex布局图片 */
+        .flex-gallery {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 15px;
+            justify-content: center;
+            margin: 20px 0;
+        }
+
+        .flex-gallery img {
+            width: 150px;
+            height: 150px;
+        }
+
+        /* 表格中的图片 */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+        }
+
+        th, td {
+            border: 1px solid #ddd;
+            padding: 12px;
+            text-align: center;
+        }
+
+        th {
+            background-color: #4CAF50;
+            color: white;
+        }
+
+        td img {
+            max-width: 100px;
+            max-height: 80px;
+        }
+
+        /* 背景图片容器 */
+        .bg-image-container {
+            background-image: linear-gradient(rgba(0,0,0,0.3), rgba(0,0,0,0.3)), url('https://picsum.photos/800/300?image=100');
+            background-size: cover;
+            background-position: center;
+            color: white;
+            padding: 60px 20px;
+            text-align: center;
+            border-radius: 8px;
+            margin: 20px 0;
+            min-height: 200px;
+        }
+
+        /* 固定尺寸图片 */
+        .fixed-size-img {
+            width: 300px;
+            height: 200px;
+            object-fit: cover;
+            border: 2px solid #9b59b6;
+        }
+
+        /* 图文环绕 */
+        .text-flow-container {
+            overflow: hidden;
+            margin: 20px 0;
+        }
+
+        .text-flow-container p {
+            text-align: justify;
+        }
+
+        /* SVG图片 */
+        .svg-container {
+            display: inline-block;
+            margin: 10px;
+        }
+
+        /* 图片组 */
+        .image-stack {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 10px;
+            margin: 20px 0;
+        }
+
+        .image-stack img {
+            border: 2px solid #e74c3c;
+            transition: all 0.3s;
+        }
+
+        /* 图片与段落混排 */
+        .mixed-content {
+            margin: 30px 0;
+        }
+
+        /* 半透明图片 */
+        .translucent-img {
+            opacity: 0.7;
+            width: 250px;
+        }
+    </style>
+</head>
+<body>
+    <h1>图片测试文档 - HTML转Word</h1>
+    <p>本文档包含各种图片使用场景，用于测试HTML转Word的图片处理效果。</p>
+
+    <!-- 1. 基础图片 -->
+    <div class="test-section">
+        <h3>1. 基础图片</h3>
+        <p>普通图片标签：</p>
+        <img src="https://picsum.photos/400/300?image=1" alt="基础测试图片">
+        <p>带标题的基础图片：</p>
+        <div class="figure-container">
+            <img src="https://picsum.photos/400/300?image=2" alt="带标题图片">
+            <div class="fig-caption">图1: 这是一张测试图片的说明文字</div>
+        </div>
+    </div>
+
+    <!-- 2. 响应式图片 -->
+    <div class="test-section">
+        <h3>2. 响应式图片</h3>
+        <p>Max-width: 100%的响应式图片：</p>
+        <img src="https://picsum.photos/800/400?image=3" alt="响应式图片" class="responsive-img">
+    </div>
+
+    <!-- 3. 带样式的图片 -->
+    <div class="test-section">
+        <h3>3. 带样式的图片</h3>
+        <p>带边框、阴影和圆角的图片：</p>
+        <img src="https://picsum.photos/350/250?image=4" alt="样式图片" class="img-with-border">
+
+        <p>圆形图片：</p>
+        <img src="https://picsum.photos/200/200?image=5" alt="圆形图片" class="img-circle">
+
+        <p>固定尺寸图片（object-fit: cover）：</p>
+        <img src="https://picsum.photos/600/300?image=6" alt="固定尺寸" class="fixed-size-img">
+
+        <p>半透明图片：</p>
+        <img src="https://picsum.photos/250/200?image=7" alt="半透明图片" class="translucent-img">
+    </div>
+
+    <!-- 4. 浮动图片 -->
+    <div class="test-section">
+        <h3>4. 图文混排 - 浮动图片</h3>
+        <div class="text-flow-container">
+            <img src="https://picsum.photos/150/150?image=8" alt="左浮动" class="img-float-left">
+            <p>这是一段测试文字。图片应该浮动在左侧，文字环绕在右侧。Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur.</p>
+            <p>这是第二段文字，继续测试浮动效果。Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum. Sed ut perspiciatis unde omnis iste natus error sit voluptatem accusantium doloremque laudantium.</p>
+        </div>
+
+        <div class="text-flow-container">
+            <img src="https://picsum.photos/150/150?image=9" alt="右浮动" class="img-float-right">
+            <p>这是另一个测试，图片浮动在右侧。Totam rem aperiam, eaque ipsa quae ab illo inventore veritatis et quasi architecto beatae vitae dicta sunt explicabo. Nemo enim ipsam voluptatem quia voluptas sit aspernatur aut odit aut fugit.</p>
+            <p>继续添加文字以测试环绕效果。Sed quia consequuntur magni dolores eos qui ratione voluptatem sequi nesciunt. Neque porro quisquam est, qui dolorem ipsum quia dolor sit amet, consectetur, adipisci velit.</p>
+        </div>
+    </div>
+
+    <!-- 5. 图片链接 -->
+    <div class="test-section">
+        <h3>5. 图片链接</h3>
+        <p>点击图片会跳转的链接：</p>
+        <a href="https://example.com" class="image-link">
+            <img src="https://picsum.photos/300/200?image=10" alt="链接图片">
+        </a>
+
+        <p>多个图片链接：</p>
+        <div class="flex-gallery">
+            <a href="https://example.com/link1" class="image-link">
+                <img src="https://picsum.photos/150/150?image=11" alt="链接1">
+            </a>
+            <a href="https://example.com/link2" class="image-link">
+                <img src="https://picsum.photos/150/150?image=12" alt="链接2">
+            </a>
+            <a href="https://example.com/link3" class="image-link">
+                <img src="https://picsum.photos/150/150?image=13" alt="链接3">
+            </a>
+            <a href="https://example.com/link4" class="image-link">
+                <img src="https://picsum.photos/150/150?image=14" alt="链接4">
+            </a>
+        </div>
+    </div>
+
+    <!-- 6. 图片网格 -->
+    <div class="test-section">
+        <h3>6. CSS Grid 图片网格</h3>
+        <p>响应式网格布局：</p>
+        <div class="image-grid">
+            <img src="https://picsum.photos/300/200?image=15" alt="网格图片1">
+            <img src="https://picsum.photos/300/200?image=16" alt="网格图片2">
+            <img src="https://picsum.photos/300/200?image=17" alt="网格图片3">
+            <img src="https://picsum.photos/300/200?image=18" alt="网格图片4">
+            <img src="https://picsum.photos/300/200?image=19" alt="网格图片5">
+            <img src="https://picsum.photos/300/200?image=20" alt="网格图片6">
+        </div>
+    </div>
+
+    <!-- 7. 图片在表格中 -->
+    <div class="test-section">
+        <h3>7. 表格中的图片</h3>
+        <table>
+            <thead>
+                <tr>
+                    <th>产品编号</th>
+                    <th>产品图片</th>
+                    <th>产品名称</th>
+                    <th>价格</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>001</td>
+                    <td><img src="https://picsum.photos/80/80?image=21" alt="产品1"></td>
+                    <td>智能手表</td>
+                    <td>¥999</td>
+                </tr>
+                <tr>
+                    <td>002</td>
+                    <td><img src="https://picsum.photos/80/80?image=22" alt="产品2"></td>
+                    <td>无线耳机</td>
+                    <td>¥599</td>
+                </tr>
+                <tr>
+                    <td>003</td>
+                    <td><img src="https://picsum.photos/80/80?image=23" alt="产品3"></td>
+                    <td>平板电脑</td>
+                    <td>¥2999</td>
+                </tr>
+                <tr>
+                    <td>004</td>
+                    <td><img src="https://picsum.photos/80/80?image=24" alt="产品4"></td>
+                    <td>蓝牙音箱</td>
+                    <td>¥399</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <!-- 8. 背景图片容器 -->
+    <div class="test-section">
+        <h3>8. 背景图片</h3>
+        <div class="bg-image-container">
+            <h2>这是一个带背景图片的容器</h2>
+            <p>背景图片应该正确显示在容器后面</p>
+            <p>叠加的文字应该清晰可见</p>
+        </div>
+    </div>
+
+    <!-- 9. SVG图片 -->
+    <div class="test-section">
+        <h3>9. SVG矢量图片</h3>
+        <p>内联SVG：</p>
+        <svg width="200" height="200" class="svg-container">
+            <circle cx="100" cy="100" r="80" fill="red" />
+            <text x="100" y="110" text-anchor="middle" fill="white" font-size="24">SVG</text>
+        </svg>
+
+        <p>SVG图片：</p>
+        <img src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAwIiBoZWlnaHQ9IjIwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KICAgIDxyZWN0IHdpZHRoPSIyMDAiIGhlaWdodD0iMjAwIiBmaWxsPSIjNENBRjUwIi8+CiAgICA8dGV4dCB4PSI1MCUiIHk9IjUwJSIgZm9udC1zaXplPSIyNCIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZHk9Ii4zZW0iIGZpbGw9IndoaXRlIj5URVhUPC90ZXh0Pgo8L3N2Zz4=" alt="SVG图片">
+    </div>
+
+    <!-- 10. 图片堆叠 -->
+    <div class="test-section">
+        <h3>10. 图片堆叠</h3>
+        <p>垂直堆叠的图片组：</p>
+        <div class="image-stack">
+            <img src="https://picsum.photos/100/80?image=25" alt="堆叠1">
+            <img src="https://picsum.photos/100/80?image=26" alt="堆叠2">
+            <img src="https://picsum.photos/100/80?image=27" alt="堆叠3">
+            <img src="https://picsum.photos/100/80?image=28" alt="堆叠4">
+        </div>
+    </div>
+
+    <!-- 11. 混合内容测试 -->
+    <div class="test-section">
+        <h3>11. 图文混合内容</h3>
+        <div class="mixed-content">
+            <h4>网络安全报告中的图表应用</h4>
+            <img src="https://picsum.photos/500/300?image=29" alt="安全图表" class="responsive-img">
+            <p>根据最近的安全态势分析，我们发现了多个重要的安全趋势。如上图所示，2024年第三季度的网络攻击数量呈现出明显的上升趋势。这种趋势反映了当前网络安全形势的严峻性。</p>
+
+            <h4>攻击类型分布</h4>
+            <img src="https://picsum.photos/450/250?image=30" alt="攻击类型" class="img-with-border">
+            <p>从攻击类型分布图可以看出，恶意软件攻击占据了主要部分，达到了45%。其次是钓鱼攻击，占比30%。</p>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin: 20px 0;">
+                <div>
+                    <img src="https://picsum.photos/300/200?image=31" alt="行业分布" style="width: 100%;">
+                    <p style="font-size: 14px; color: #666;">各行业受攻击情况统计</p>
+                </div>
+                <div>
+                    <img src="https://picsum.photos/300/200?image=32" alt="区域分布" style="width: 100%;">
+                    <p style="font-size: 14px; color: #666;">区域攻击分布热力图</p>
+                </div>
+            </div>
+
+            <p>综合分析以上数据，我们建议加强以下几个方面的防护措施：1) 强化员工安全意识培训；2) 部署多层次安全防护系统；3) 建立快速响应机制。</p>
+        </div>
+    </div>
+
+    <!-- 12. 复杂嵌套布局 -->
+    <div class="test-section">
+        <h3>12. 复杂嵌套布局中的图片</h3>
+        <div style="display: flex; gap: 20px; margin: 20px 0;">
+            <div style="flex: 1; padding: 15px; background: #f0f0f0;">
+                <img src="https://picsum.photos/200/150?image=33" alt="嵌套图片1" style="width: 100%; border-radius: 8px;">
+                <h4>安全监控</h4>
+                <p>24小时不间断安全监控服务</p>
+            </div>
+            <div style="flex: 1; padding: 15px; background: #f0f0f0;">
+                <img src="https://picsum.photos/200/150?image=34" alt="嵌套图片2" style="width: 100%; border-radius: 8px;">
+                <h4>威胁分析</h4>
+                <p>深度威胁情报分析能力</p>
+            </div>
+            <div style="flex: 1; padding: 15px; background: #f0f0f0;">
+                <img src="https://picsum.photos/200/150?image=35" alt="嵌套图片3" style="width: 100%; border-radius: 8px;">
+                <h4>应急响应</h4>
+                <p>快速应急响应和处置</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- 13. 长文本与多个图片 -->
+    <div class="test-section">
+        <h3>13. 长文本中的多个图片</h3>
+        <h4>网络安全态势深度分析报告</h4>
+
+        <img src="https://picsum.photos/600/350?image=36" alt="总体态势" class="responsive-img">
+        <p>2024年第三季度的网络安全态势呈现出前所未有的复杂性。勒索软件攻击同比增长了35%，而供应链攻击更是激增了120%。这些数据表明，企业面临的安全威胁正在快速演变。</p>
+
+        <img src="https://picsum.photos/400/200?image=37" alt="时间线" style="float: right; margin: 0 0 15px 15px; width: 300px;">
+        <p>从时间分布来看，攻击活动在工作日的上午9点至下午5点之间最为活跃。这与正常业务时间高度重合，说明攻击者针对性地选择了员工工作最繁忙的时段发动攻击，以期造成最大的破坏效果。统计显示，这一时段的攻击成功率比其他时段高出42%。</p>
+
+        <h4>关键威胁指标</h4>
+        <div class="image-grid">
+            <div>
+                <img src="https://picsum.photos/200/150?image=38" alt="指标1" style="width: 100%;">
+                <p style="font-size: 13px; text-align: center; color: #555;">恶意域名注册量激增</p>
+            </div>
+            <div>
+                <img src="https://picsum.photos/200/150?image=39" alt="指标2" style="width: 100%;">
+                <p style="font-size: 13px; text-align: center; color: #555;">钓鱼邮件数量变化</p>
+            </div>
+            <div>
+                <img src="https://picsum.photos/200/150?image=40" alt="指标3" style="width: 100%;">
+                <p style="font-size: 13px; text-align: center; color: #555;">漏洞利用尝试统计</p>
+            </div>
+            <div>
+                <img src="https://picsum.photos/200/150?image=41" alt="指标4" style="width: 100%;">
+                <p style="font-size: 13px; text-align: center; color: #555;">僵尸网络规模变化</p>
+            </div>
+        </div>
+
+        <h4>行业影响分析</h4>
+        <img src="https://picsum.photos/500/250?image=42" alt="行业分析" class="responsive-img">
+        <p>金融行业和医疗行业仍然是攻击的主要目标，占总攻击数量的45%。其中，小型医疗机构的安全防护能力相对薄弱，成为攻击者重点突破的对象。报告建议这些机构采用零信任架构，并定期进行渗透测试。</p>
+
+        <p>制造业和供应链企业面临的风险正在快速上升。由于物联网设备的广泛部署，这些企业的攻击面大幅扩大。典型的攻击路径包括通过不安全的物联网设备渗透，然后横向移动到核心业务系统。</p>
+
+        <img src="https://picsum.photos/550/300?image=43" alt="攻击路径" class="responsive-img">
+        <p>上图展示了典型的多阶段攻击路径。攻击者通常从侦察开始，通过社会工程或技术手段获取初始访问权限，然后逐步提升权限并在网络中横向移动，最终达到攻击目标。</p>
+
+        <h4>未来趋势预测</h4>
+        <p>基于当前的数据分析，我们预计以下趋势将继续发展：</p>
+        <img src="https://picsum.photos/450/200?image=44" alt="预测图表" style="float: left; margin: 0 20px 10px 0; width: 250px;">
+        <ol>
+            <li>AI驱动的攻击将变得更加普遍和复杂，自动化攻击工具的出现将降低攻击门槛</li>
+            <li>云服务将成为攻击焦点，针对云部署的攻击将大幅增加</li>
+            <li>5G和边缘计算带来的新攻击面需要引起足够重视</li>
+            <li>量子计算的发展将对现有的加密体系构成威胁</li>
+        </ol>
+        <p>企业需要采取前瞻性的安全策略，包括持续的安全监控、威胁情报收集、员工安全培训和先进的安全技术应用。</p>
+
+        <img src="https://picsum.photos/600/200?image=45" alt="总结图表" class="responsive-img">
+        <p>总结来说，2024年第三季度的网络安全态势异常严峻。企业必须保持警惕，采取全面的安全防护措施，并持续关注和应对新出现的威胁。通过实施建议的安全最佳实践，可以有效降低遭受攻击的风险。</p>
+    </div>
+
+</body>
+</html>
