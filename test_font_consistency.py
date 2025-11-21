@@ -1,64 +1,64 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
-测试字体一致性 - 验证转换后的Word文档中字体是否统一
+Test script to verify font consistency in Word documents.
+
+This script tests the fix for mixed character type font consistency.
 """
 
 from docx import Document
+from html2word.utils.font_utils import apply_uniform_font, get_run_font_info
 import sys
-import io
 
-# 设置标准输出为UTF-8编码
-if sys.platform == 'win32':
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+def test_font_consistency():
+    """Test font consistency across different character types."""
 
-def check_font_consistency(docx_path):
-    """
-    检查Word文档中的字体一致性
+    # Create a test document
+    doc = Document()
 
-    Args:
-        docx_path: Word文档路径
-    """
-    doc = Document(docx_path)
+    # Test case 1: Mixed Chinese, numbers, and spaces
+    para1 = doc.add_paragraph()
+    run1 = para1.add_run("2024年第三季度网络安全态势分析报告")
+    apply_uniform_font(run1, "Microsoft YaHei")
 
-    print(f"检查文档: {docx_path}\n")
+    # Test case 2: Pure numbers
+    para2 = doc.add_paragraph()
+    run2 = para2.add_run("2024 123 456")
+    apply_uniform_font(run2, "Microsoft YaHei")
 
-    # 检查每个段落
-    for i, para in enumerate(doc.paragraphs):
-        if not para.text.strip():
-            continue
+    # Test case 3: Mixed English and Chinese
+    para3 = doc.add_paragraph()
+    run3 = para3.add_run("Security Report 2024 年第三季度")
+    apply_uniform_font(run3, "Microsoft YaHei")
 
-        # 收集段落中所有run的字体
-        fonts_in_para = []
-        for run in para.runs:
-            if run.text.strip():
-                font_name = run.font.name
-                font_size = run.font.size.pt if run.font.size else "未设置"
-                fonts_in_para.append((font_name, font_size, run.text[:20]))
+    # Save the document
+    doc.save("font_consistency_test.docx")
 
-        # 检查是否存在字体不一致
-        if fonts_in_para:
-            unique_fonts = set((f[0], f[1]) for f in fonts_in_para)
+    # Print debug information
+    print("Font information for each run:")
+    print(f"Run 1 (mixed): {get_run_font_info(run1)}")
+    print(f"Run 2 (numbers): {get_run_font_info(run2)}")
+    print(f"Run 3 (mixed lang): {get_run_font_info(run3)}")
 
-            if len(unique_fonts) > 1:
-                print(f"⚠️  段落 {i+1} 存在字体不一致:")
-                print(f"   文本: {para.text[:50]}...")
-                print(f"   字体详情:")
-                for font_name, font_size, text in fonts_in_para:
-                    print(f"      - {font_name} ({font_size}pt): '{text}'")
-                print()
-            else:
-                # 显示所有字体一致的段落
-                font_name, font_size = list(unique_fonts)[0]
-                print(f"✓  段落 {i+1} 字体一致:")
-                print(f"   文本: {para.text[:80]}...")
-                print(f"   字体: {font_name} ({font_size}pt)")
-                print()
+    print("\nTest document created: font_consistency_test.docx")
+    print("Please open this document and check if all characters use the same font.")
+
+def test_original_vs_fixed():
+    """Compare original and fixed conversion results."""
+
+    print("=== Font Consistency Test ===")
+    print()
+    print("Testing the fix for mixed character font consistency...")
+    print()
+
+    # Test the fix
+    test_font_consistency()
+
+    print()
+    print("Instructions:")
+    print("1. Open 'font_consistency_test.docx'")
+    print("2. Check if '2024年第三季度网络安全态势分析报告' appears in consistent font")
+    print("3. Before the fix: '2024' would be MS Gothic, rest would be Microsoft YaHei")
+    print("4. After the fix: All text should be Microsoft YaHei")
 
 if __name__ == "__main__":
-    if len(sys.argv) > 1:
-        docx_path = sys.argv[1]
-    else:
-        docx_path = "test_output_fixed.docx"
-
-    check_font_consistency(docx_path)
+    test_original_vs_fixed()

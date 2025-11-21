@@ -13,6 +13,7 @@ from docx.enum.table import WD_ALIGN_VERTICAL
 from html2word.utils.colors import ColorConverter
 from html2word.utils.fonts import FontMapper
 from html2word.utils.units import UnitConverter
+from html2word.utils.font_utils import apply_uniform_font
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +36,8 @@ class StyleMapper:
         # Font family
         if 'font-family' in styles:
             font_name = self.font_mapper.map_font(styles['font-family'])
-            run.font.name = font_name
+            # Use uniform font application to ensure consistent display across character types
+            apply_uniform_font(run, font_name)
 
         # Font size
         if 'font-size' in styles:
