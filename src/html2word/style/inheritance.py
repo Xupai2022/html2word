@@ -163,11 +163,13 @@ class StyleInheritance:
 
         Returns:
             Dictionary of default property values
+
+        Note:
+            Font properties (font-family, font-size) are NOT included here.
+            They should be defined in HTML/CSS only, not hardcoded.
         """
         return {
-            # Font properties
-            'font-family': 'Times New Roman',
-            'font-size': '16px',
+            # Font properties (font-family and font-size removed - use HTML/CSS values)
             'font-style': 'normal',
             'font-weight': 'normal',
             'font-variant': 'normal',

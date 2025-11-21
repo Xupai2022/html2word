@@ -5,6 +5,8 @@ Main coordinator for building Word documents from DOM trees.
 """
 
 import logging
+import math
+import re
 from typing import Optional
 from docx import Document
 
@@ -91,9 +93,25 @@ class DocumentBuilder:
             level = int(tag[1])
             self.paragraph_builder.build_heading(node, level)
 
-        # Paragraphs and divs
-        elif tag in ('p', 'div', 'blockquote', 'pre'):
+        # Paragraphs
+        elif tag in ('p', 'blockquote', 'pre'):
             self.paragraph_builder.build_paragraph(node)
+
+        # Divs - intelligent handling based on layout and styles
+        elif tag == 'div':
+            # FIXED: display:grid now works correctly after removing default styles
+            if self._should_convert_to_grid_table(node):
+                # Grid/flex layout - convert to table with horizontal layout
+                self._convert_grid_to_table_smart(node)
+            elif self._should_wrap_in_styled_table(node):
+                # Has background/border - wrap in table to preserve styling
+                self._wrap_div_in_styled_table(node)
+            elif self._should_treat_div_as_paragraph(node):
+                # Only inline content - treat as paragraph
+                self.paragraph_builder.build_paragraph(node)
+            else:
+                # Plain container - process children
+                self._process_children(node)
 
         # Lists
         elif tag in ('ul', 'ol'):
@@ -184,6 +202,375 @@ class DocumentBuilder:
 
         # Add bottom border (simplified)
         paragraph.add_run()
+
+    def _should_treat_div_as_paragraph(self, node: DOMNode) -> bool:
+        """
+        Determine if a div should be treated as a paragraph or a container.
+
+        Args:
+            node: DOM node
+
+        Returns:
+            True if should treat as paragraph, False if should treat as container
+        """
+        # Check if div has any block-level children
+        for child in node.children:
+            if child.is_element and not child.is_inline:
+                # Has block-level children - treat as container
+                return False
+
+        # Only has text and inline elements - treat as paragraph
+        # But only if it has actual content
+        text_content = node.get_text_content().strip()
+        if text_content:
+            return True
+
+        # Empty or only whitespace - treat as container (will be skipped)
+        return False
+
+    def _should_convert_to_grid_table(self, node: DOMNode) -> bool:
+        """
+        Check if div uses grid/flex layout and should be converted to table.
+
+        Args:
+            node: DOM node
+
+        Returns:
+            True if should convert to table
+        """
+        if not node.computed_styles:
+            return False
+
+        display = node.computed_styles.get('display', '')
+
+        # Check for grid or flex with multiple children
+        if 'grid' in display or 'flex' in display:
+            child_elements = [c for c in node.children if c.is_element and not c.is_inline]
+            # Only convert if has 2+ block-level children (grid items)
+            if len(child_elements) >= 2:
+                logger.debug(f"Detected {display} layout with {len(child_elements)} children, converting to table")
+                return True
+
+        return False
+
+    def _should_wrap_in_styled_table(self, node: DOMNode) -> bool:
+        """
+        Check if div has significant styling that requires table wrapper.
+
+        Args:
+            node: DOM node
+
+        Returns:
+            True if needs table wrapper for styling
+        """
+        if not node.computed_styles:
+            return False
+
+        # Has block-level children (not simple paragraph)
+        has_block_children = any(
+            c.is_element and not c.is_inline
+            for c in node.children
+        )
+
+        if not has_block_children:
+            return False  # Simple content, can be paragraph
+
+        # Check for important visual styles
+        styles = node.computed_styles
+
+        # Background color - check if it's a meaningful color (not white/transparent)
+        has_background = False
+        bg_color = styles.get('background-color', '')
+
+        if bg_color and bg_color not in ('', 'transparent', 'rgba(0, 0, 0, 0)', 'rgba(0,0,0,0)'):
+            bg_lower = bg_color.lower()
+            # Check if it's not white or very light color
+            is_white = (
+                bg_lower in ('#fff', '#ffffff', 'white', 'rgb(255,255,255)', 'rgb(255, 255, 255)') or
+                bg_lower.startswith('#fff') or
+                'rgb(255,255,255)' in bg_lower.replace(' ', '')
+            )
+
+            if not is_white:
+                has_background = True
+
+        # Also check background property (in case background-color wasn't set)
+        bg_prop = styles.get('background', '')
+        if bg_prop and bg_prop not in ('', 'none', 'transparent'):
+            bg_lower = bg_prop.lower()
+            # Check if gradient
+            if 'gradient' in bg_lower:
+                has_background = True
+            # Check if not white
+            elif bg_lower not in ('white', '#fff', '#ffffff', 'rgb(255,255,255)', 'rgb(255, 255, 255)'):
+                has_background = True
+
+        # Borders - only count if it's a full border or prominent styling
+        has_border = False
+        border_count = sum(
+            1 for side in ['top', 'right', 'bottom', 'left']
+            if f'border-{side}-width' in styles and
+            styles.get(f'border-{side}-width', '0') not in ('0', '0px', 'none')
+        )
+        # Only consider it styled if it has 3+ sides bordered (like a box)
+        if border_count >= 3:
+            has_border = True
+
+        # Box shadow - only meaningful if combined with non-white background or border
+        # Shadow on plain white background doesn't need table wrapping
+        has_shadow = 'box-shadow' in styles and styles['box-shadow'] not in ('none', '')
+
+        # Only wrap if:
+        # - Has non-white background, OR
+        # - Has significant border, OR
+        # - Has shadow + (non-white background OR border)
+        # Don't wrap for shadow alone on white background
+        if has_shadow and not has_background and not has_border:
+            return False  # Shadow alone on white background - don't wrap
+
+        return has_background or has_border or has_shadow
+
+    def _convert_grid_to_table(self, grid_node: DOMNode):
+        """
+        Convert a grid/flex container to a Word table.
+
+        Args:
+            grid_node: DOM node with grid/flex layout
+        """
+        try:
+            # Get grid properties
+            display = grid_node.computed_styles.get('display', '')
+            grid_template_cols = grid_node.computed_styles.get('grid-template-columns', '')
+
+            # Collect direct children (grid items)
+            child_elements = [child for child in grid_node.children if child.is_element]
+
+            if not child_elements:
+                # No children, render as paragraph
+                self.paragraph_builder.build_paragraph(grid_node)
+                return
+
+            # Determine number of columns
+            num_cols = self._determine_grid_columns(grid_template_cols, len(child_elements))
+
+            # Calculate number of rows
+            num_rows = (len(child_elements) + num_cols - 1) // num_cols
+
+            logger.debug(f"Creating table from grid: {num_rows} rows × {num_cols} columns")
+
+            # Create table
+            table = self.document.add_table(rows=num_rows, cols=num_cols)
+
+            # Fill table with grid items
+            cell_index = 0
+            for row_idx in range(num_rows):
+                for col_idx in range(num_cols):
+                    if cell_index < len(child_elements):
+                        child = child_elements[cell_index]
+                        cell = table.rows[row_idx].cells[col_idx]
+
+                        # Add child content to cell
+                        # Get text content and add as paragraph
+                        text_content = child.get_text_content()
+                        if text_content.strip():
+                            paragraph = cell.paragraphs[0]
+                            paragraph.text = text_content.strip()
+
+                            # Apply styles from child to cell
+                            if child.computed_styles:
+                                from html2word.word_builder.style_mapper import StyleMapper
+                                mapper = StyleMapper()
+                                mapper.apply_table_cell_style(cell, child.computed_styles, child.box_model)
+
+                        cell_index += 1
+
+            # Apply grid container styles to table
+            if grid_node.computed_styles:
+                # Apply background color if present
+                bg_color = grid_node.computed_styles.get('background-color')
+                if bg_color:
+                    # Apply to all cells
+                    for row in table.rows:
+                        for cell in row.cells:
+                            if cell.paragraphs:
+                                from html2word.word_builder.style_mapper import StyleMapper
+                                mapper = StyleMapper()
+                                # Create temporary style dict for background
+                                temp_styles = {'background-color': bg_color}
+                                mapper.apply_table_cell_style(cell, temp_styles)
+
+        except Exception as e:
+            logger.warning(f"Error converting grid to table: {e}, falling back to paragraph")
+            # Fallback: render as paragraph
+            self.paragraph_builder.build_paragraph(grid_node)
+
+    def _convert_grid_to_table_smart(self, grid_node: DOMNode):
+        """
+        Intelligently convert grid/flex layout to table, preserving nested structure.
+
+        Args:
+            grid_node: DOM node with grid/flex layout
+        """
+        try:
+            grid_template_cols = grid_node.computed_styles.get('grid-template-columns', '')
+            child_elements = [c for c in grid_node.children if c.is_element and not c.is_inline]
+
+            if not child_elements:
+                self._process_children(grid_node)
+                return
+
+            # Determine columns
+            num_cols = self._determine_grid_columns(grid_template_cols, len(child_elements))
+            num_rows = (len(child_elements) + num_cols - 1) // num_cols
+
+            logger.debug(f"Creating smart grid table: {num_rows}×{num_cols}")
+
+            # Create table
+            table = self.document.add_table(rows=num_rows, cols=num_cols)
+
+            # Fill cells with grid items
+            cell_index = 0
+            for row_idx in range(num_rows):
+                for col_idx in range(num_cols):
+                    if cell_index < len(child_elements):
+                        child = child_elements[cell_index]
+                        cell = table.rows[row_idx].cells[col_idx]
+
+                        # Apply cell styles from child
+                        if child.computed_styles:
+                            from html2word.word_builder.style_mapper import StyleMapper
+                            mapper = StyleMapper()
+                            box_model = child.layout_info.get('box_model') if hasattr(child, 'layout_info') else None
+                            mapper.apply_table_cell_style(cell, child.computed_styles, box_model)
+
+                        # Recursively process child content in cell context
+                        # Save current document temporarily
+                        original_doc = self.document
+
+                        # Create a temporary processor for cell content
+                        # We need to clear the first paragraph if it's empty
+                        if len(cell.paragraphs) == 1 and not cell.paragraphs[0].text:
+                            # Remove empty paragraph
+                            p = cell.paragraphs[0]._element
+                            p.getparent().remove(p)
+
+                        # Process child's children in the cell
+                        for grandchild in child.children:
+                            self._process_node_in_cell(grandchild, cell, original_doc)
+
+                        # Restore document
+                        self.document = original_doc
+                        cell_index += 1
+
+        except Exception as e:
+            logger.warning(f"Error in smart grid conversion: {e}, falling back")
+            self._process_children(grid_node)
+
+    def _process_node_in_cell(self, node: DOMNode, cell, original_doc):
+        """Process a node within a table cell context."""
+        # Create a wrapper that redirects document operations to cell
+        class CellDocumentWrapper:
+            def __init__(self, cell_obj, original):
+                self._cell = cell_obj
+                self._original = original
+
+            def add_paragraph(self, *args, **kwargs):
+                return self._cell.add_paragraph(*args, **kwargs)
+
+            def add_table(self, *args, **kwargs):
+                # FIXED: Add table to cell, not to original document
+                return self._cell.add_table(*args, **kwargs)
+
+        old_doc = self.paragraph_builder.document
+        old_table_doc = self.table_builder.document
+        old_self_doc = self.document
+
+        wrapper = CellDocumentWrapper(cell, original_doc)
+        self.paragraph_builder.document = wrapper
+        self.table_builder.document = wrapper
+        self.document = wrapper  # CRITICAL: Also replace self.document for grid conversion
+
+        try:
+            self._process_node(node)
+        finally:
+            self.paragraph_builder.document = old_doc
+            self.table_builder.document = old_table_doc
+            self.document = old_self_doc
+
+    def _wrap_div_in_styled_table(self, node: DOMNode):
+        """
+        Wrap a styled div in a single-cell table to preserve background/borders.
+
+        Args:
+            node: DOM node with styling
+        """
+        try:
+            logger.debug("Wrapping styled div in table")
+
+            # Create 1x1 table
+            table = self.document.add_table(rows=1, cols=1)
+            cell = table.rows[0].cells[0]
+
+            # Apply div styles to cell
+            if node.computed_styles:
+                from html2word.word_builder.style_mapper import StyleMapper
+                mapper = StyleMapper()
+                box_model = node.layout_info.get('box_model') if hasattr(node, 'layout_info') else None
+                mapper.apply_table_cell_style(cell, node.computed_styles, box_model)
+
+            # Clear default empty paragraph if present
+            if len(cell.paragraphs) == 1 and not cell.paragraphs[0].text:
+                p = cell.paragraphs[0]._element
+                p.getparent().remove(p)
+
+            # Process children within the cell
+            original_doc = self.document
+            for child in node.children:
+                self._process_node_in_cell(child, cell, original_doc)
+            self.document = original_doc
+
+        except Exception as e:
+            logger.warning(f"Error wrapping div in table: {e}, falling back")
+            self._process_children(node)
+
+    def _determine_grid_columns(self, grid_template_cols: str, num_items: int) -> int:
+        """
+        Determine number of columns from grid-template-columns or auto-fit/auto-fill.
+
+        Args:
+            grid_template_cols: CSS grid-template-columns value
+            num_items: Number of grid items
+
+        Returns:
+            Number of columns
+        """
+        if not grid_template_cols:
+            # Default: try to make a square-ish grid
+            return max(1, int(math.sqrt(num_items)))
+
+        # Count explicit column definitions
+        # Handle: "repeat(3, 1fr)", "200px 200px 200px", "repeat(auto-fit, minmax(250px, 1fr))"
+        if 'repeat' in grid_template_cols.lower():
+            # Try to extract repeat count
+            import re
+            match = re.search(r'repeat\s*\(\s*(\d+|auto-fit|auto-fill)', grid_template_cols)
+            if match:
+                count_str = match.group(1)
+                if count_str.isdigit():
+                    return int(count_str)
+                else:
+                    # auto-fit/auto-fill: use actual item count for single-row layout
+                    # In Word output (print), we want all items in one row
+                    # Limit to reasonable max (e.g., 6 columns)
+                    return min(6, num_items)
+
+        # Count space-separated values
+        parts = grid_template_cols.strip().split()
+        if len(parts) > 0:
+            return len(parts)
+
+        # Default
+        return min(3, num_items)
 
     def save(self, output_path: str):
         """

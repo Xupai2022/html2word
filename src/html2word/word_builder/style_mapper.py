@@ -139,21 +139,33 @@ class StyleMapper:
             except:
                 pass
 
-        # Background color (shading)
+        # Background color (shading) with opacity support
         if 'background-color' in styles:
             try:
-                rgb_color = ColorConverter.to_rgb_color(styles['background-color'])
+                bg_color = styles['background-color']
+                # Apply opacity if present
+                if 'opacity' in styles:
+                    bg_color = self._apply_opacity_to_color(bg_color, styles['opacity'])
+
+                rgb_color = ColorConverter.to_rgb_color(bg_color)
                 if rgb_color:
                     from docx.oxml import parse_xml
                     from docx.oxml.ns import nsdecls
 
                     # Add shading element
                     shd = parse_xml(
-                        f'<w:shd {nsdecls("w")} w:fill="{ColorConverter.to_hex(styles["background-color"])[1:]}"/>'
+                        f'<w:shd {nsdecls("w")} w:fill="{ColorConverter.to_hex(bg_color)[1:]}"/>'
                     )
                     paragraph._element.get_or_add_pPr().append(shd)
             except Exception as e:
                 logger.warning(f"Error setting paragraph background: {e}")
+
+        # Handle box-shadow by adding subtle border (degradation)
+        if 'box-shadow' in styles and box_model:
+            try:
+                self._apply_box_shadow_degradation(paragraph, styles['box-shadow'])
+            except Exception as e:
+                logger.warning(f"Error applying box-shadow degradation: {e}")
 
     def apply_table_cell_style(self, cell, styles: Dict[str, Any], box_model=None):
         """
@@ -294,3 +306,85 @@ class StyleMapper:
             'bottom': WD_ALIGN_VERTICAL.BOTTOM,
         }
         return align_map.get(css_align.lower())
+
+    def _apply_opacity_to_color(self, color: str, opacity: Any) -> str:
+        """
+        Apply opacity to a color by blending with white background.
+
+        Args:
+            color: Color value (hex, rgb, rgba, or named)
+            opacity: Opacity value (0.0-1.0 or string)
+
+        Returns:
+            Color with opacity applied (as hex or rgb)
+        """
+        try:
+            # Parse opacity value
+            if isinstance(opacity, str):
+                opacity = float(opacity)
+            elif isinstance(opacity, (int, float)):
+                opacity = float(opacity)
+            else:
+                return color
+
+            # Clamp opacity to 0.0-1.0
+            opacity = max(0.0, min(1.0, opacity))
+
+            # If opacity is 1.0, no change needed
+            if opacity >= 0.99:
+                return color
+
+            # Convert color to RGB
+            rgb_color = ColorConverter.to_rgb_color(color)
+            if not rgb_color:
+                return color
+
+            # Blend with white background (255, 255, 255)
+            r = int(rgb_color.r * opacity + 255 * (1 - opacity))
+            g = int(rgb_color.g * opacity + 255 * (1 - opacity))
+            b = int(rgb_color.b * opacity + 255 * (1 - opacity))
+
+            # Return as hex color
+            return f'#{r:02x}{g:02x}{b:02x}'
+
+        except Exception as e:
+            logger.warning(f"Error applying opacity to color: {e}")
+            return color
+
+    def _apply_box_shadow_degradation(self, paragraph, box_shadow_value: str):
+        """
+        Degrade box-shadow to a subtle border for visual approximation.
+
+        Args:
+            paragraph: python-docx Paragraph object
+            box_shadow_value: CSS box-shadow value
+
+        Note:
+            Word doesn't support shadows, so we approximate with a light gray border.
+        """
+        try:
+            from docx.oxml import parse_xml
+            from docx.oxml.ns import nsdecls
+
+            # Parse box-shadow to detect if it's significant
+            # Format: h-offset v-offset blur spread color
+            # For simplicity, we just add a subtle border if box-shadow exists
+            if box_shadow_value and box_shadow_value.lower() != 'none':
+                # Add a subtle gray border to approximate shadow
+                pPr = paragraph._element.get_or_add_pPr()
+
+                # Check if borders already exist
+                pBdr = pPr.find('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}pBdr')
+                if pBdr is None:
+                    # Add subtle bottom and right borders to simulate shadow
+                    borders_xml = f'''
+                        <w:pBdr {nsdecls("w")}>
+                            <w:bottom w:val="single" w:sz="4" w:space="1" w:color="D3D3D3"/>
+                            <w:right w:val="single" w:sz="4" w:space="1" w:color="D3D3D3"/>
+                        </w:pBdr>
+                    '''
+                    pBdr = parse_xml(borders_xml)
+                    pPr.append(pBdr)
+
+        except Exception as e:
+            logger.warning(f"Error in box-shadow degradation: {e}")

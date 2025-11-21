@@ -3,8 +3,6 @@
 
 body:
   margin: 8px
-  font-family: "Times New Roman"
-  font-size: 16px
   color: "#000000"
   line-height: 1.2
 
@@ -14,51 +12,43 @@ h1:
   font-weight: bold
   margin-top: 0.67em
   margin-bottom: 0.67em
-  display: block
 
 h2:
   font-size: 1.5em
   font-weight: bold
   margin-top: 0.83em
   margin-bottom: 0.83em
-  display: block
 
 h3:
   font-size: 1.17em
   font-weight: bold
   margin-top: 1em
   margin-bottom: 1em
-  display: block
 
 h4:
   font-size: 1em
   font-weight: bold
   margin-top: 1.33em
   margin-bottom: 1.33em
-  display: block
 
 h5:
   font-size: 0.83em
   font-weight: bold
   margin-top: 1.67em
   margin-bottom: 1.67em
-  display: block
 
 h6:
   font-size: 0.67em
   font-weight: bold
   margin-top: 2.33em
   margin-bottom: 2.33em
-  display: block
 
 # 段落
 p:
   margin-top: 1em
   margin-bottom: 1em
-  display: block
 
-div:
-  display: block
+# div元素不设置默认display，让CSS完全控制
 
 # 文本样式
 strong:
@@ -87,20 +77,19 @@ ul:
   margin-top: 1em
   margin-bottom: 1em
   margin-left: 40px
-  display: block
   list-style-type: disc
 
 ol:
   margin-top: 1em
   margin-bottom: 1em
   margin-left: 40px
-  display: block
   list-style-type: decimal
 
+# li元素保留list-item display（特殊需求）
 li:
   display: list-item
 
-# 表格
+# 表格 - 保留display属性（表格需要特殊的display值）
 table:
   display: table
   border-collapse: separate

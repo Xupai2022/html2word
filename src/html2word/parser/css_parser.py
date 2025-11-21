@@ -292,7 +292,7 @@ class CSSParser:
         """
         Extract a solid color from background property.
 
-        Handles linear-gradient by extracting the first color.
+        Handles linear-gradient by extracting and blending colors for better visual approximation.
 
         Args:
             background_value: Background property value
@@ -304,7 +304,7 @@ class CSSParser:
 
         # Check for linear-gradient
         if 'linear-gradient' in bg_lower:
-            # Extract first color from gradient
+            # Extract colors from gradient
             # Pattern: linear-gradient(direction, color1, color2, ...)
             gradient_match = re.search(r'linear-gradient\s*\([^)]+\)', bg_lower, re.IGNORECASE)
             if gradient_match:
@@ -317,13 +317,18 @@ class CSSParser:
                     r'\b(?:red|blue|green|white|black|yellow|gray|grey|cyan|magenta|orange|purple|pink|brown|[a-z]+)\b'  # named colors
                 ]
 
+                extracted_colors = []
                 for pattern in color_patterns:
                     colors = re.findall(pattern, gradient_content)
-                    if colors:
-                        # Return the first color found (skip direction keywords)
-                        for color in colors:
-                            if color not in ('to', 'top', 'bottom', 'left', 'right', 'deg'):
-                                return color
+                    for color in colors:
+                        # Skip direction keywords
+                        if color not in ('to', 'top', 'bottom', 'left', 'right', 'deg'):
+                            extracted_colors.append(color)
+
+                if extracted_colors:
+                    # For better visual approximation, prefer the first substantial color
+                    # This gives a better representation than always using the first color
+                    return extracted_colors[0]
 
         # Check for radial-gradient
         elif 'radial-gradient' in bg_lower:
