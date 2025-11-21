@@ -33,6 +33,7 @@ class DocumentBuilder:
         self.paragraph_builder = ParagraphBuilder(self.document)
         self.table_builder = TableBuilder(self.document)
         self.image_builder = ImageBuilder(self.document, base_path)
+        self.in_table_cell = False  # Track if we're processing content inside a table cell
 
     def build(self, tree: DOMTree) -> Document:
         """
@@ -110,7 +111,9 @@ class DocumentBuilder:
                 # Only inline content - treat as paragraph
                 self.paragraph_builder.build_paragraph(node)
             else:
-                # Plain container - process children
+                # Plain container - process children directly
+                # NO spacing needed: child elements handle their own margins via space_after
+                # This implements CSS margin collapse behavior
                 self._process_children(node)
 
         # Lists
@@ -137,8 +140,10 @@ class DocumentBuilder:
         elif tag == 'hr':
             self._add_horizontal_rule()
 
-        # Container elements - process children
+        # Container elements - process children directly
         elif tag in ('body', 'html', 'main', 'article', 'section', 'header', 'footer', 'nav', 'aside'):
+            # NO spacing needed: child elements handle their own margins via space_after
+            # This implements CSS margin collapse behavior naturally
             self._process_children(node)
 
         # Inline elements - skip (should be handled by paragraph builder)
@@ -263,6 +268,12 @@ class DocumentBuilder:
         Returns:
             True if needs table wrapper for styling
         """
+        # CRITICAL: If already inside a table cell, do NOT wrap in another table
+        # This prevents nested table creation and eliminates duplicate spacing
+        if self.in_table_cell:
+            logger.debug(f"Skipping table wrap for {node.tag} (already in cell)")
+            return False
+
         if not node.computed_styles:
             return False
 
@@ -425,8 +436,11 @@ class DocumentBuilder:
 
             logger.debug(f"Creating smart grid table: {num_rows}×{num_cols}")
 
-            # Create table
+            # Create table (no spacing before - previous element's space_after handles that)
             table = self.document.add_table(rows=num_rows, cols=num_cols)
+
+            # Apply gap as table cell spacing (read from HTML, not hardcoded)
+            self._apply_grid_gap_to_table(table, grid_node.computed_styles)
 
             # Fill cells with grid items
             cell_index = 0
@@ -436,11 +450,13 @@ class DocumentBuilder:
                         child = child_elements[cell_index]
                         cell = table.rows[row_idx].cells[col_idx]
 
-                        # Apply cell styles from child
+                        # Apply cell styles from child (including background, border, padding)
                         if child.computed_styles:
                             from html2word.word_builder.style_mapper import StyleMapper
+                            from html2word.style.box_model import BoxModel
                             mapper = StyleMapper()
-                            box_model = child.layout_info.get('box_model') if hasattr(child, 'layout_info') else None
+                            # Calculate box model from child element to get padding, borders
+                            box_model = BoxModel(child)
                             mapper.apply_table_cell_style(cell, child.computed_styles, box_model)
 
                         # Recursively process child content in cell context
@@ -462,9 +478,71 @@ class DocumentBuilder:
                         self.document = original_doc
                         cell_index += 1
 
+            # Apply spacing after table (from grid container's margin-bottom)
+            self._apply_spacing_after_table(grid_node)
+
         except Exception as e:
             logger.warning(f"Error in smart grid conversion: {e}, falling back")
             self._process_children(grid_node)
+
+    def _apply_grid_gap_to_table(self, table, computed_styles: dict):
+        """
+        Apply grid/flex gap as Word table cell spacing.
+        Reads gap values from HTML/CSS (not hardcoded).
+
+        Args:
+            table: Word table object
+            computed_styles: Computed CSS styles containing gap properties
+        """
+        if not computed_styles:
+            return
+
+        # Read gap values from HTML/CSS (row-gap and column-gap were expanded from gap by CSS parser)
+        gap_value = computed_styles.get('gap') or computed_styles.get('row-gap') or computed_styles.get('column-gap')
+
+        if not gap_value:
+            return
+
+        try:
+            from html2word.utils.units import UnitConverter
+
+            # Convert gap to points
+            gap_pt = UnitConverter.to_pt(gap_value)
+
+            if gap_pt <= 0:
+                return
+
+            # Convert points to twips (Word's internal unit: 1 pt = 20 twips)
+            gap_twips = int(gap_pt * 20)
+
+            logger.debug(f"Applying grid gap: {gap_value} → {gap_pt}pt → {gap_twips} twips")
+
+            # Apply cell spacing to table using OpenXML
+            from docx.oxml import parse_xml
+            from docx.oxml.ns import nsdecls
+
+            tbl = table._element
+            tblPr = tbl.tblPr
+
+            # Ensure tblPr exists
+            if tblPr is None:
+                tblPr = parse_xml(f'<w:tblPr {nsdecls("w")}/>')
+                tbl.insert(0, tblPr)
+
+            # Add or update tblCellSpacing element
+            # Remove existing cellSpacing if present
+            for child in list(tblPr):
+                if child.tag.endswith('tblCellSpacing'):
+                    tblPr.remove(child)
+
+            # Add new cellSpacing (applies to all sides)
+            cellSpacing = parse_xml(
+                f'<w:tblCellSpacing {nsdecls("w")} w:w="{gap_twips}" w:type="dxa"/>'
+            )
+            tblPr.append(cellSpacing)
+
+        except Exception as e:
+            logger.warning(f"Failed to apply grid gap: {e}")
 
     def _process_node_in_cell(self, node: DOMNode, cell, original_doc):
         """Process a node within a table cell context."""
@@ -484,11 +562,15 @@ class DocumentBuilder:
         old_doc = self.paragraph_builder.document
         old_table_doc = self.table_builder.document
         old_self_doc = self.document
+        old_in_cell = self.in_table_cell  # Save previous state
+        old_margin_bottom = self.paragraph_builder.last_margin_bottom  # Save margin state
 
         wrapper = CellDocumentWrapper(cell, original_doc)
         self.paragraph_builder.document = wrapper
         self.table_builder.document = wrapper
         self.document = wrapper  # CRITICAL: Also replace self.document for grid conversion
+        self.in_table_cell = True  # Mark that we're inside a cell
+        self.paragraph_builder.last_margin_bottom = 0.0  # Reset margin collapse in new context
 
         try:
             self._process_node(node)
@@ -496,6 +578,8 @@ class DocumentBuilder:
             self.paragraph_builder.document = old_doc
             self.table_builder.document = old_table_doc
             self.document = old_self_doc
+            self.in_table_cell = old_in_cell  # Restore previous state
+            self.paragraph_builder.last_margin_bottom = old_margin_bottom  # Restore margin state
 
     def _wrap_div_in_styled_table(self, node: DOMNode):
         """
@@ -507,7 +591,7 @@ class DocumentBuilder:
         try:
             logger.debug("Wrapping styled div in table")
 
-            # Create 1x1 table
+            # Create 1x1 table (no spacing before - previous element's space_after handles that)
             table = self.document.add_table(rows=1, cols=1)
             cell = table.rows[0].cells[0]
 
@@ -529,9 +613,69 @@ class DocumentBuilder:
                 self._process_node_in_cell(child, cell, original_doc)
             self.document = original_doc
 
+            # Apply spacing after table (from div's margin-bottom)
+            self._apply_spacing_after_table(node)
+
         except Exception as e:
             logger.warning(f"Error wrapping div in table: {e}, falling back")
             self._process_children(node)
+
+    def _apply_spacing_before_table(self, node: DOMNode):
+        """
+        DEPRECATED: No longer used. Previous element's space_after handles spacing.
+
+        Kept for compatibility but does nothing.
+        This implements CSS margin collapse: we don't add spacing before elements,
+        only after (via space_after on paragraphs or spacer after tables).
+        """
+        pass  # Intentionally do nothing
+
+    def _apply_spacing_after_table(self, node: DOMNode):
+        """
+        Apply spacing after a table based on the source element's margin-bottom.
+
+        Since tables don't support paragraph_format.space_after, we add a spacer paragraph
+        with space_before set to the table's margin-bottom. This implements the "only space_after"
+        principle (or in this case, space_before on the spacer represents the table's bottom margin).
+
+        Args:
+            node: Source DOM node (div/grid container/table wrapper)
+        """
+        try:
+            # Calculate box model to get margin
+            from html2word.style.box_model import BoxModel
+            box_model = BoxModel(node)
+
+            # Apply margin-bottom as space_before on a spacer paragraph
+            # This represents the table's margin-bottom and will be the spacing
+            # between this table and the next element
+            if box_model.margin.bottom > 0:
+                from docx.shared import Pt
+                spacer = self.document.add_paragraph()
+                spacer.paragraph_format.space_before = Pt(box_model.margin.bottom)
+                logger.debug(f"Applied {box_model.margin.bottom}pt spacing after table (from margin-bottom)")
+        except Exception as e:
+            logger.debug(f"Could not apply spacing after table: {e}")
+
+    def _apply_container_spacing_before(self, node: DOMNode):
+        """
+        DEPRECATED: No longer used. Implements CSS margin collapse behavior.
+
+        In CSS, vertical margins collapse. To mimic this in Word, we only apply
+        space_after on elements, never space_before. This method is kept for
+        compatibility but does nothing.
+        """
+        pass  # Intentionally do nothing - implements margin collapse
+
+    def _apply_container_spacing_after(self, node: DOMNode):
+        """
+        DEPRECATED: No longer used. Implements CSS margin collapse behavior.
+
+        Container elements (section, article, etc.) don't need explicit spacing.
+        Their child elements handle spacing via their own margin-bottom (space_after).
+        This method is kept for compatibility but does nothing.
+        """
+        pass  # Intentionally do nothing - child elements handle their own spacing
 
     def _determine_grid_columns(self, grid_template_cols: str, num_items: int) -> int:
         """

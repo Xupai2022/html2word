@@ -285,6 +285,21 @@ class CSSParser:
             if bg_color:
                 expanded['background-color'] = bg_color
 
+        # Expand gap shorthand (for grid/flex layouts)
+        # gap can be: "20px" (both) or "20px 15px" (row column)
+        if 'gap' in styles:
+            gap_value = styles['gap'].strip()
+            parts = gap_value.split()
+
+            if len(parts) == 1:
+                # Single value: applies to both row-gap and column-gap
+                expanded['row-gap'] = parts[0]
+                expanded['column-gap'] = parts[0]
+            elif len(parts) >= 2:
+                # Two values: row-gap column-gap
+                expanded['row-gap'] = parts[0]
+                expanded['column-gap'] = parts[1]
+
         return expanded
 
     @classmethod

@@ -1,0 +1,854 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>2024年第三季度网络安全态势分析报告</title>
+    <style>
+        body {
+            font-family: 'Microsoft YaHei', '微软雅黑', Arial, sans-serif;
+            line-height: 1.6;
+            margin: 0;
+            padding: 20px;
+            background-color: #f8f9fa;
+            color: #333;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 40px;
+            border-bottom: 3px solid #2c3e50;
+            padding-bottom: 20px;
+        }
+
+        .header h1 {
+            color: #2c3e50;
+            font-size: 28px;
+            margin: 0 0 10px 0;
+            font-weight: bold;
+        }
+
+        .header .subtitle {
+            color: #7f8c8d;
+            font-size: 16px;
+            margin: 0;
+        }
+
+        .header .date {
+            color: #95a5a6;
+            font-size: 14px;
+            margin-top: 10px;
+        }
+
+        .executive-summary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 25px;
+            border-radius: 8px;
+            margin-bottom: 30px;
+        }
+
+        .executive-summary h2 {
+            margin-top: 0;
+            font-size: 20px;
+            border-bottom: 2px solid rgba(255,255,255,0.3);
+            padding-bottom: 10px;
+        }
+
+        .risk-overview {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .risk-card {
+            padding: 20px;
+            border-radius: 8px;
+            text-align: center;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+
+        .risk-critical {
+            background: linear-gradient(135deg, #ff6b6b, #ee5a52);
+            color: white;
+        }
+
+        .risk-high {
+            background: linear-gradient(135deg, #ffa726, #ff9800);
+            color: white;
+        }
+
+        .risk-medium {
+            background: linear-gradient(135deg, #ffca28, #ffc107);
+            color: #333;
+        }
+
+        .risk-low {
+            background: linear-gradient(135deg, #66bb6a, #4caf50);
+            color: white;
+        }
+
+        .risk-card h3 {
+            margin: 0 0 10px 0;
+            font-size: 16px;
+        }
+
+        .risk-card .number {
+            font-size: 32px;
+            font-weight: bold;
+            margin: 10px 0;
+        }
+
+        .risk-card .change {
+            font-size: 12px;
+            opacity: 0.9;
+        }
+
+        .section {
+            margin-bottom: 40px;
+        }
+
+        .section h2 {
+            color: #2c3e50;
+            font-size: 22px;
+            border-left: 4px solid #3498db;
+            padding-left: 15px;
+            margin-bottom: 20px;
+        }
+
+        .section h3 {
+            color: #34495e;
+            font-size: 18px;
+            margin-bottom: 15px;
+        }
+
+        .table-container {
+            overflow-x: auto;
+            margin: 20px 0;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            background: white;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        th {
+            background: linear-gradient(135deg, #3498db, #2980b9);
+            color: white;
+            padding: 15px;
+            text-align: left;
+            font-weight: bold;
+        }
+
+        td {
+            padding: 12px 15px;
+            border-bottom: 1px solid #ecf0f1;
+        }
+
+        tr:nth-child(even) {
+            background-color: #f8f9fa;
+        }
+
+        tr:hover {
+            background-color: #e3f2fd;
+        }
+
+        .severity-critical {
+            background-color: #ffebee;
+            color: #c62828;
+            font-weight: bold;
+        }
+
+        .severity-high {
+            background-color: #fff3e0;
+            color: #ef6c00;
+            font-weight: bold;
+        }
+
+        .severity-medium {
+            background-color: #fffde7;
+            color: #f57f17;
+        }
+
+        .severity-low {
+            background-color: #e8f5e8;
+            color: #2e7d32;
+        }
+
+        .status-open {
+            background-color: #ffebee;
+            color: #c62828;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: bold;
+        }
+
+        .status-in-progress {
+            background-color: #fff3e0;
+            color: #ef6c00;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: bold;
+        }
+
+        .status-resolved {
+            background-color: #e8f5e8;
+            color: #2e7d32;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: bold;
+        }
+
+        .chart-container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            margin: 20px 0;
+        }
+
+        .trend-line {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 10px 0;
+            border-bottom: 1px solid #ecf0f1;
+        }
+
+        .trend-line:last-child {
+            border-bottom: none;
+        }
+
+        .trend-label {
+            font-weight: bold;
+            color: #2c3e50;
+        }
+
+        .trend-value {
+            font-size: 18px;
+            font-weight: bold;
+        }
+
+        .trend-up {
+            color: #e74c3c;
+        }
+
+        .trend-down {
+            color: #27ae60;
+        }
+
+        .recommendations {
+            background: linear-gradient(135deg, #f8f9fa, #e9ecef);
+            padding: 25px;
+            border-radius: 8px;
+            border-left: 5px solid #17a2b8;
+        }
+
+        .recommendations ul {
+            list-style: none;
+            padding: 0;
+        }
+
+        .recommendations li {
+            padding: 8px 0;
+            border-bottom: 1px solid #dee2e6;
+            position: relative;
+            padding-left: 20px;
+        }
+
+        .recommendations li:before {
+            content: "→";
+            position: absolute;
+            left: 0;
+            color: #17a2b8;
+            font-weight: bold;
+        }
+
+        .footer {
+            text-align: center;
+            margin-top: 40px;
+            padding-top: 20px;
+            border-top: 2px solid #ecf0f1;
+            color: #7f8c8d;
+            font-size: 14px;
+        }
+
+        .highlight-box {
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin: 20px 0;
+        }
+
+        .metric-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin: 20px 0;
+        }
+
+        .metric-card {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            text-align: center;
+        }
+
+        .metric-value {
+            font-size: 24px;
+            font-weight: bold;
+            color: #2c3e50;
+            margin-bottom: 5px;
+        }
+
+        .metric-label {
+            color: #7f8c8d;
+            font-size: 14px;
+        }
+
+        @media print {
+            .container {
+                box-shadow: none;
+                max-width: none;
+            }
+
+            .risk-overview {
+                grid-template-columns: repeat(4, 1fr);
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>2024年第三季度网络安全态势分析报告</h1>
+            <p class="subtitle">Security Operations Center (SOC) 季度安全态势评估</p>
+            <p class="date">报告日期：2024年10月15日 | 报告周期：2024年7月-9月</p>
+        </div>
+
+        <div class="executive-summary">
+            <h2>执行摘要</h2>
+            <p>本季度网络安全态势整体可控，但呈现复杂化趋势。共检测到安全事件<strong>2,847起</strong>，较上季度增长12.3%。其中高危事件<strong>156起</strong>，中危事件<strong>892起</strong>。勒索软件攻击呈现明显上升趋势，钓鱼邮件数量增长45.2%。内网横向移动事件增加67%，表明攻击者技术手段日趋复杂。</p>
+            <p>关键发现：供应链攻击成为新的攻击热点，本季度检测到<strong>23起</strong>针对软件供应链的攻击尝试；物联网设备成为新的攻击入口，共发现<strong>189个</strong>存在安全漏洞的IoT设备。</p>
+        </div>
+
+        <div class="risk-overview">
+            <div class="risk-card risk-critical">
+                <h3>严重风险</h3>
+                <div class="number">23</div>
+                <div class="change">↑ 35.3% vs Q2</div>
+            </div>
+            <div class="risk-card risk-high">
+                <h3>高危风险</h3>
+                <div class="number">156</div>
+                <div class="change">↑ 18.2% vs Q2</div>
+            </div>
+            <div class="risk-card risk-medium">
+                <h3>中危风险</h3>
+                <div class="number">892</div>
+                <div class="change">↑ 8.7% vs Q2</div>
+            </div>
+            <div class="risk-card risk-low">
+                <h3>低危风险</h3>
+                <div class="number">1,776</div>
+                <div class="change">↓ 2.1% vs Q2</div>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>安全事件统计分析</h2>
+
+            <div class="metric-grid">
+                <div class="metric-card">
+                    <div class="metric-value">2,847</div>
+                    <div class="metric-label">总安全事件数</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-value">156</div>
+                    <div class="metric-label">高危事件数</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-value">99.2%</div>
+                    <div class="metric-label">事件响应率</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-value">2.3小时</div>
+                    <div class="metric-label">平均响应时间</div>
+                </div>
+            </div>
+
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>事件类型</th>
+                            <th>发生次数</th>
+                            <th>较上季度变化</th>
+                            <th>严重程度</th>
+                            <th>处置状态</th>
+                            <th>影响范围</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>勒索软件攻击</td>
+                            <td>47</td>
+                            <td class="trend-up">↑ 89.1%</td>
+                            <td><span class="severity-critical">严重</span></td>
+                            <td><span class="status-resolved">已处置</span></td>
+                            <td>核心生产系统</td>
+                        </tr>
+                        <tr>
+                            <td>钓鱼邮件</td>
+                            <td>1,234</td>
+                            <td class="trend-up">↑ 45.2%</td>
+                            <td><span class="severity-high">高危</span></td>
+                            <td><span class="status-in-progress">处置中</span></td>
+                            <td>全员邮箱</td>
+                        </tr>
+                        <tr>
+                            <td>内网横向移动</td>
+                            <td>78</td>
+                            <td class="trend-up">↑ 67.0%</td>
+                            <td><span class="severity-high">高危</span></td>
+                            <td><span class="status-resolved">已处置</span></td>
+                            <td>内部网络</td>
+                        </tr>
+                        <tr>
+                            <td>DDoS攻击</td>
+                            <td>156</td>
+                            <td class="trend-down">↓ 23.4%</td>
+                            <td><span class="severity-medium">中危</span></td>
+                            <td><span class="status-resolved">已处置</span></td>
+                            <td>公网服务</td>
+                        </tr>
+                        <tr>
+                            <td>恶意软件感染</td>
+                            <td>289</td>
+                            <td class="trend-up">↑ 12.8%</td>
+                            <td><span class="severity-medium">中危</span></td>
+                            <td><span class="status-resolved">已处置</span></td>
+                            <td>终端设备</td>
+                        </tr>
+                        <tr>
+                            <td>数据泄露尝试</td>
+                            <td>67</td>
+                            <td class="trend-up">↑ 34.0%</td>
+                            <td><span class="severity-critical">严重</span></td>
+                            <td><span class="status-in-progress">处置中</span></td>
+                            <td>数据库系统</td>
+                        </tr>
+                        <tr>
+                            <td>权限提升</td>
+                            <td>89</td>
+                            <td class="trend-up">↑ 56.1%</td>
+                            <td><span class="severity-high">高危</span></td>
+                            <td><span class="status-resolved">已处置</span></td>
+                            <td>服务器集群</td>
+                        </tr>
+                        <tr>
+                            <td>供应链攻击</td>
+                            <td>23</td>
+                            <td class="trend-up">↑ 新类型</td>
+                            <td><span class="severity-critical">严重</span></td>
+                            <td><span class="status-open">待处置</span></td>
+                            <td>第三方组件</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>威胁情报分析</h2>
+
+            <div class="chart-container">
+                <h3>攻击来源地理分布</h3>
+                <div class="trend-line">
+                    <span class="trend-label">亚太地区</span>
+                    <span class="trend-value trend-up">1,247起 (43.8%)</span>
+                </div>
+                <div class="trend-line">
+                    <span class="trend-label">北美地区</span>
+                    <span class="trend-value trend-up">892起 (31.3%)</span>
+                </div>
+                <div class="trend-line">
+                    <span class="trend-label">欧洲地区</span>
+                    <span class="trend-value trend-down">456起 (16.0%)</span>
+                </div>
+                <div class="trend-line">
+                    <span class="trend-label">其他地区</span>
+                    <span class="trend-value">252起 (8.9%)</span>
+                </div>
+            </div>
+
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>威胁组织</th>
+                            <th>活跃程度</th>
+                            <th>主要攻击手法</th>
+                            <th>目标行业</th>
+                            <th>威胁等级</th>
+                            <th>最新活动时间</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>APT29 (Cozy Bear)</td>
+                            <td>高</td>
+                            <td>钓鱼邮件、零日漏洞</td>
+                            <td>政府、医疗</td>
+                            <td><span class="severity-critical">严重</span></td>
+                            <td>2024-09-28</td>
+                        </tr>
+                        <tr>
+                            <td>Lazarus Group</td>
+                            <td>高</td>
+                            <td>供应链攻击、勒索软件</td>
+                            <td>金融、科技</td>
+                            <td><span class="severity-critical">严重</span></td>
+                            <td>2024-09-30</td>
+                        </tr>
+                        <tr>
+                            <td>APT33 (Elfin)</td>
+                            <td>中</td>
+                            <td>WebShell、暴力破解</td>
+                            <td>能源、化工</td>
+                            <td><span class="severity-high">高危</span></td>
+                            <td>2024-09-25</td>
+                        </tr>
+                        <tr>
+                            <td>DarkSide</td>
+                            <td>中</td>
+                            <td>勒索软件即服务</td>
+                            <td>制造、零售</td>
+                            <td><span class="severity-high">高危</span></td>
+                            <td>2024-09-27</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>漏洞管理统计</h2>
+
+            <div class="metric-grid">
+                <div class="metric-card">
+                    <div class="metric-value">1,247</div>
+                    <div class="metric-label">发现漏洞总数</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-value">89</div>
+                    <div class="metric-label">高危漏洞数</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-value">6.2天</div>
+                    <div class="metric-label">平均修复时间</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-value">94.7%</div>
+                    <div class="metric-label">漏洞修复率</div>
+                </div>
+            </div>
+
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>漏洞编号</th>
+                            <th>漏洞名称</th>
+                            <th>CVSS评分</th>
+                            <th>影响系统</th>
+                            <th>修复状态</th>
+                            <th>发现时间</th>
+                            <th>修复时间</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>CVE-2024-1234</td>
+                            <td>Log4j远程代码执行</td>
+                            <td><span style="color: #c62828; font-weight: bold;">9.8</span></td>
+                            <td>日志服务器集群</td>
+                            <td><span class="status-resolved">已修复</span></td>
+                            <td>2024-07-15</td>
+                            <td>2024-07-16</td>
+                        </tr>
+                        <tr>
+                            <td>CVE-2024-5678</td>
+                            <td>Windows提权漏洞</td>
+                            <td><span style="color: #ef6c00; font-weight: bold;">8.4</span></td>
+                            <td>域控制器</td>
+                            <td><span class="status-resolved">已修复</span></td>
+                            <td>2024-08-02</td>
+                            <td>2024-08-05</td>
+                        </tr>
+                        <tr>
+                            <td>CVE-2024-9012</td>
+                            <td>SQL注入漏洞</td>
+                            <td><span style="color: #c62828; font-weight: bold;">9.1</span></td>
+                            <td>业务数据库</td>
+                            <td><span class="status-in-progress">修复中</span></td>
+                            <td>2024-09-10</td>
+                            <td>-</td>
+                        </tr>
+                        <tr>
+                            <td>CVE-2024-3456</td>
+                            <td>SSL/TLS配置错误</td>
+                            <td><span style="color: #f57f17;">5.3</span></td>
+                            <td>Web应用服务器</td>
+                            <td><span class="status-resolved">已修复</span></td>
+                            <td>2024-07-20</td>
+                            <td>2024-07-22</td>
+                        </tr>
+                        <tr>
+                            <td>CVE-2024-7890</td>
+                            <td>API接口未授权访问</td>
+                            <td><span style="color: #ef6c00; font-weight: bold;">7.8</span></td>
+                            <td>微服务架构</td>
+                            <td><span class="status-open">待修复</span></td>
+                            <td>2024-09-25</td>
+                            <td>-</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>安全合规性评估</h2>
+
+            <div class="highlight-box">
+                <h3 style="margin-top: 0; color: white;">合规性评分：87.3分（优秀）</h3>
+                <p>本季度合规性评估覆盖ISO 27001、等保2.0、PCI DSS三大标准体系，整体合规率达到92.4%，较上季度提升3.1个百分点。</p>
+            </div>
+
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>合规标准</th>
+                            <th>控制点总数</th>
+                            <th>符合项</th>
+                            <th>不符合项</th>
+                            <th>合规率</th>
+                            <th>评级</th>
+                            <th>改进建议</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>ISO 27001:2013</td>
+                            <td>114</td>
+                            <td>108</td>
+                            <td>6</td>
+                            <td><strong>94.7%</strong></td>
+                            <td><span class="status-resolved">优秀</span></td>
+                            <td>加强供应商管理</td>
+                        </tr>
+                        <tr>
+                            <td>等保2.0（三级）</td>
+                            <td>156</td>
+                            <td>141</td>
+                            <td>15</td>
+                            <td><strong>90.4%</strong></td>
+                            <td><span class="status-resolved">良好</span></td>
+                            <td>完善日志审计</td>
+                        </tr>
+                        <tr>
+                            <td>PCI DSS v3.2.1</td>
+                            <td>78</td>
+                            <td>69</td>
+                            <td>9</td>
+                            <td><strong>88.5%</strong></td>
+                            <td><span class="status-resolved">良好</span></td>
+                            <td>加密算法升级</td>
+                        </tr>
+                        <tr>
+                            <td>SOC 2 Type II</td>
+                            <td>92</td>
+                            <td>79</td>
+                            <td>13</td>
+                            <td><strong>85.9%</strong></td>
+                            <td><span class="status-in-progress">达标</span></td>
+                            <td>访问控制优化</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>安全意识培训统计</h2>
+
+            <div class="metric-grid">
+                <div class="metric-card">
+                    <div class="metric-value">2,456</div>
+                    <div class="metric-label">参训人数</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-value">96.8%</div>
+                    <div class="metric-label">培训完成率</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-value">87.2分</div>
+                    <div class="metric-label">平均考核成绩</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-value">-34.5%</div>
+                    <div class="metric-label">钓鱼邮件点击率</div>
+                </div>
+            </div>
+
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>培训主题</th>
+                            <th>参训人数</th>
+                            <th>完成率</th>
+                            <th>考核平均分</th>
+                            <th>满意度</th>
+                            <th>培训效果评估</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>钓鱼邮件识别与防范</td>
+                            <td>856</td>
+                            <td>98.2%</td>
+                            <td>89.4</td>
+                            <td>4.6/5.0</td>
+                            <td>钓鱼邮件点击率下降68%</td>
+                        </tr>
+                        <tr>
+                            <td>密码安全管理</td>
+                            <td>723</td>
+                            <td>97.8%</td>
+                            <td>85.7</td>
+                            <td>4.4/5.0</td>
+                            <td>弱密码使用率下降42%</td>
+                        </tr>
+                        <tr>
+                            <td>移动设备安全</td>
+                            <td>634</td>
+                            <td>95.1%</td>
+                            <td>86.9</td>
+                            <td>4.5/5.0</td>
+                            <td>移动安全事件下降29%</td>
+                        </tr>
+                        <tr>
+                            <td>数据分类与保护</td>
+                            <td>567</td>
+                            <td>96.3%</td>
+                            <td>88.1</td>
+                            <td>4.7/5.0</td>
+                            <td>数据泄露事件下降35%</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>安全投资与预算执行</h2>
+
+            <div class="chart-container">
+                <h3>季度安全投资分布（单位：万元）</h3>
+                <div class="trend-line">
+                    <span class="trend-label">安全防护工具</span>
+                    <span class="trend-value">456万元 (38.2%)</span>
+                </div>
+                <div class="trend-line">
+                    <span class="trend-label">人员培训与认证</span>
+                    <span class="trend-value">234万元 (19.6%)</span>
+                </div>
+                <div class="trend-line">
+                    <span class="trend-label">合规与审计</span>
+                    <span class="trend-value">189万元 (15.8%)</span>
+                </div>
+                <div class="trend-line">
+                    <span class="trend-label">应急响应</span>
+                    <span class="trend-value">156万元 (13.1%)</span>
+                </div>
+                <div class="trend-line">
+                    <span class="trend-label">其他</span>
+                    <span class="trend-value">159万元 (13.3%)</span>
+                </div>
+            </div>
+
+            <div class="highlight-box">
+                <h3 style="margin-top: 0; color: white;">预算执行：1,194万元（执行率：99.5%）</h3>
+                <p>本季度安全预算执行良好，主要投资集中在威胁检测能力提升和安全人才培养方面。ROI达到342%，安全投资回报率显著。</p>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>下季度重点工作计划</h2>
+
+            <div class="recommendations">
+                <h3>关键行动计划</h3>
+                <ul>
+                    <li>部署AI驱动的威胁检测系统，提升未知威胁发现能力</li>
+                    <li>实施零信任网络架构改造，强化内网安全防护</li>
+                    <li>建立供应链安全管控体系，防范第三方风险</li>
+                    <li>开展勒索软件专项演练，提高应急处置能力</li>
+                    <li>推进安全自动化建设，提升安全运营效率</li>
+                    <li>加强IoT设备安全管理，建立设备准入机制</li>
+                    <li>完善数据安全治理体系，落实数据分类分级</li>
+                    <li>建立威胁情报共享机制，提升联防联动能力</li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>风险评估与建议</h2>
+
+            <div class="highlight-box">
+                <h3 style="margin-top: 0; color: white;">主要风险预警</h3>
+                <p><strong>高风险：</strong> 勒索软件攻击预计将持续增长，攻击目标可能转向关键基础设施；供应链攻击将成为主流攻击手段，需要特别关注第三方组件安全。</p>
+                <p><strong>中风险：</strong> 内部威胁呈上升趋势，特权账户滥用风险增加；云安全威胁随着云化进程加速而增大。</p>
+            </div>
+
+            <div class="recommendations">
+                <h3>战略建议</h3>
+                <ul>
+                    <li>建立统一的安全运营中心，实现7×24小时持续监控</li>
+                    <li>加强与行业伙伴的威胁情报共享，构建联防体系</li>
+                    <li>投资人工智能和机器学习技术，提升威胁检测自动化水平</li>
+                    <li>建立完善的安全人才培养体系，提升团队专业能力</li>
+                    <li>定期开展攻防演练，检验安全防护体系有效性</li>
+                    <li>建立供应链安全审查机制，加强第三方风险管理</li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="footer">
+            <p>本报告由网络安全部编制 | 数据截至2024年9月30日 | 下次报告发布时间：2025年1月15日</p>
+            <p>联系方式：security@company.com | 紧急响应热线：400-1234-5678</p>
+        </div>
+    </div>
+</body>
+</html>

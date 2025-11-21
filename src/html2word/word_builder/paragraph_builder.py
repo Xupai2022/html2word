@@ -27,10 +27,12 @@ class ParagraphBuilder:
         """
         self.document = document
         self.style_mapper = StyleMapper()
+        # Track previous element's margin-bottom for true margin collapse
+        self.last_margin_bottom = 0.0
 
     def build_paragraph(self, node: DOMNode) -> Optional[object]:
         """
-        Build a Word paragraph from HTML node.
+        Build a Word paragraph from HTML node with proper margin collapse.
 
         Args:
             node: DOM node (typically p, h1-h6, div, etc.)
@@ -44,13 +46,20 @@ class ParagraphBuilder:
         # Create paragraph
         paragraph = self.document.add_paragraph()
 
-        # Apply paragraph-level styles
+        # Apply paragraph-level styles with margin collapse
         box_model = node.layout_info.get('box_model')
         self.style_mapper.apply_paragraph_style(
             paragraph,
             node.computed_styles,
-            box_model
+            box_model,
+            prev_margin_bottom=self.last_margin_bottom  # Pass for margin collapse
         )
+
+        # Update last_margin_bottom for next element
+        if box_model:
+            self.last_margin_bottom = box_model.margin.bottom
+        else:
+            self.last_margin_bottom = 0.0
 
         # Process content (text and inline elements)
         self._process_content(node, paragraph)

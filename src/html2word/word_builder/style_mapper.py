@@ -80,14 +80,15 @@ class StyleMapper:
             # We can use highlighting, but it has limited colors
             pass
 
-    def apply_paragraph_style(self, paragraph, styles: Dict[str, Any], box_model=None):
+    def apply_paragraph_style(self, paragraph, styles: Dict[str, Any], box_model=None, prev_margin_bottom: float = 0):
         """
-        Apply paragraph styles.
+        Apply paragraph styles with proper margin collapse.
 
         Args:
             paragraph: python-docx Paragraph object
             styles: Computed CSS styles
             box_model: BoxModel object (optional)
+            prev_margin_bottom: Previous element's margin-bottom in pt (for margin collapse)
         """
         fmt = paragraph.paragraph_format
 
@@ -112,15 +113,28 @@ class StyleMapper:
             except:
                 pass
 
-        # Margins (spacing)
+        # Margins (spacing) - Implement true CSS margin collapse
+        # CSS spec: Adjacent vertical margins collapse to the LARGER of the two values
+        # Example: element A has margin-bottom: 30pt, element B has margin-top: 50pt
+        #          → Actual spacing between A and B is max(30, 50) = 50pt (NOT 80pt)
         if box_model:
-            # Space before (margin-top)
-            if box_model.margin.top > 0:
-                fmt.space_before = Pt(box_model.margin.top)
+            margin_top = box_model.margin.top
+            margin_bottom = box_model.margin.bottom
 
-            # Space after (margin-bottom)
-            if box_model.margin.bottom > 0:
-                fmt.space_after = Pt(box_model.margin.bottom)
+            # True margin collapse: compare current margin-top with previous margin-bottom
+            # Take the larger value
+            if margin_top > prev_margin_bottom:
+                # Current element's margin-top is larger than previous element's margin-bottom
+                # Need to add extra spacing via space_before to reach the correct total
+                extra_spacing = margin_top - prev_margin_bottom
+                if extra_spacing > 0:
+                    fmt.space_before = Pt(extra_spacing)
+                    logger.debug(f"Margin collapse: margin-top {margin_top}pt > prev margin-bottom {prev_margin_bottom}pt, adding space_before={extra_spacing}pt")
+            # else: Previous margin-bottom already provides enough spacing (it was larger)
+
+            # Always set margin-bottom as space_after for next element
+            if margin_bottom > 0:
+                fmt.space_after = Pt(margin_bottom)
 
             # Left indent (margin-left)
             if box_model.margin.left > 0:
@@ -201,10 +215,10 @@ class StyleMapper:
         if box_model and box_model.border.has_border():
             self._apply_cell_borders(cell, box_model.border)
 
-        # Cell padding (margins)
-        if box_model:
-            # Note: python-docx cell margin support is limited
-            pass
+        # Cell padding - apply CSS padding as Word cell margins
+        if box_model and (box_model.padding.top > 0 or box_model.padding.right > 0 or
+                         box_model.padding.bottom > 0 or box_model.padding.left > 0):
+            self._apply_cell_padding(cell, box_model.padding)
 
     def _apply_cell_borders(self, cell, border):
         """Apply borders to table cell."""
@@ -252,6 +266,55 @@ class StyleMapper:
 
         except Exception as e:
             logger.warning(f"Error applying cell borders: {e}")
+
+    def _apply_cell_padding(self, cell, padding):
+        """
+        Apply padding to table cell as Word cell margins.
+
+        Args:
+            cell: python-docx Cell object
+            padding: BoxEdge object with padding values in pt
+        """
+        try:
+            from docx.oxml import parse_xml
+            from docx.oxml.ns import nsdecls
+            from docx.shared import Pt
+
+            tc = cell._element
+            tcPr = tc.get_or_add_tcPr()
+
+            # Word uses cell margins instead of padding
+            # Convert pt to twips (1 pt = 20 twips)
+            margin_elements = []
+
+            if padding.top > 0:
+                twips = int(padding.top * 20)
+                margin_elements.append(f'<w:top w:w="{twips}" w:type="dxa"/>')
+
+            if padding.left > 0:
+                twips = int(padding.left * 20)
+                margin_elements.append(f'<w:left w:w="{twips}" w:type="dxa"/>')
+
+            if padding.bottom > 0:
+                twips = int(padding.bottom * 20)
+                margin_elements.append(f'<w:bottom w:w="{twips}" w:type="dxa"/>')
+
+            if padding.right > 0:
+                twips = int(padding.right * 20)
+                margin_elements.append(f'<w:right w:w="{twips}" w:type="dxa"/>')
+
+            if margin_elements:
+                tcMar_xml = f'''
+                    <w:tcMar {nsdecls("w")}>
+                        {chr(10).join(margin_elements)}
+                    </w:tcMar>
+                '''
+                tcMar = parse_xml(tcMar_xml)
+                tcPr.append(tcMar)
+                logger.debug(f"Applied cell padding: top={padding.top}pt, right={padding.right}pt, bottom={padding.bottom}pt, left={padding.left}pt")
+
+        except Exception as e:
+            logger.warning(f"Error applying cell padding: {e}")
 
     def _map_border_style(self, css_style: str) -> str:
         """
