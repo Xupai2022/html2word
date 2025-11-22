@@ -246,13 +246,8 @@ class ImageBuilder:
             if png_data:
                 return self._insert_svg_as_image(png_data, width_val, height_val, "svglib")
 
-            # Try method 4: SimpleSVGConverter (pure Python)
-            png_data = self._convert_svg_with_simple_converter(svg_content, width_val, height_val)
-            if png_data:
-                return self._insert_svg_as_image(png_data, width_val, height_val, "SimpleSVGConverter")
-
-            # Fallback: Create placeholder
-            logger.warning("All SVG conversion methods failed, using placeholder")
+            # Fallback: cairosvg and svglib failed
+            logger.warning("SVG conversion failed: Both cairosvg and svglib not available or failed")
             return self._create_svg_fallback_placeholder(svg_node, width, height)
 
         except Exception as e:
@@ -357,43 +352,6 @@ class ImageBuilder:
             return None
         except Exception as e:
             logger.warning(f"svglib conversion failed: {e}")
-            return None
-
-    def _convert_svg_with_simple_converter(self, svg_content: str, width_pt: float, height_pt: float) -> Optional[bytes]:
-        """
-        Convert SVG to PNG using SimpleSVGConverter (pure Python).
-
-        Args:
-            svg_content: SVG XML string
-            width_pt: Target width in points
-            height_pt: Target height in points
-
-        Returns:
-            PNG data as bytes or None
-        """
-        try:
-            from html2word.utils.svg_converter import SimpleSVGConverter
-
-            converter = SimpleSVGConverter()
-
-            # Convert points to pixels (assuming 96 DPI)
-            width_px = int(width_pt * 96 / 72)
-            height_px = int(height_pt * 96 / 72)
-
-            png_data = converter.convert(svg_content, width_px, height_px)
-
-            if png_data:
-                logger.debug("SVG converted using SimpleSVGConverter")
-                return png_data
-            else:
-                logger.debug("SimpleSVGConverter returned None")
-                return None
-
-        except ImportError:
-            logger.debug("SimpleSVGConverter not available")
-            return None
-        except Exception as e:
-            logger.warning(f"SimpleSVGConverter conversion failed: {e}")
             return None
 
     def _insert_svg_as_image(self, png_data: bytes, width_pt: float, height_pt: float, method: str) -> Optional[object]:
