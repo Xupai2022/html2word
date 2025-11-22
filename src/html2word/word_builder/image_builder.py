@@ -207,9 +207,10 @@ class ImageBuilder:
         Convert inline SVG to image and insert.
 
         Tries multiple conversion methods in order:
-        1. cairosvg (best quality)
-        2. svglib + reportlab (good compatibility)
-        3. PIL placeholder (fallback)
+        1. BrowserSVGConverter (best for complex charts)
+        2. cairosvg (high quality)
+        3. svglib + reportlab (good compatibility)
+        4. PIL placeholder (fallback)
 
         Args:
             svg_node: SVG DOM node
@@ -220,12 +221,24 @@ class ImageBuilder:
             python-docx InlineShape object or None
         """
         try:
+            # Check if SVG uses external references (icon fonts) - skip these
+            use_elements = [child for child in svg_node.children if child.tag == 'use']
+            if use_elements:
+                # Check if it references external icon
+                for use_elem in use_elements:
+                    xlink_href = use_elem.get_attribute('xlink:href') or use_elem.get_attribute('href')
+                    if xlink_href and xlink_href.startswith('#icon-'):
+                        logger.info(f"Skipping SVG icon reference: {xlink_href}")
+                        return None
+
             # Get SVG content by serializing the node
             svg_content = self._serialize_svg_node(svg_node, width, height)
 
-            if not svg_content:
-                logger.warning("Empty SVG content")
+            if not svg_content or len(svg_content) < 50:
+                logger.warning(f"Empty or too short SVG content: {len(svg_content)} chars")
                 return None
+
+            logger.info(f"Converting SVG to image: {width}x{height}, content length: {len(svg_content)} chars")
 
             # Parse dimensions
             width_val = self._parse_dimension(width)
@@ -234,24 +247,28 @@ class ImageBuilder:
             # Try method 1: BrowserSVGConverter (best for complex charts)
             png_data = self._convert_svg_with_browser(svg_content, width_val, height_val)
             if png_data:
+                logger.info(f"SVG converted successfully using Browser")
                 return self._insert_svg_as_image(png_data, width_val, height_val, "Browser")
 
             # Try method 2: cairosvg (high quality)
             png_data = self._convert_svg_with_cairosvg(svg_content)
             if png_data:
+                logger.info(f"SVG converted successfully using cairosvg")
                 return self._insert_svg_as_image(png_data, width_val, height_val, "cairosvg")
 
             # Try method 3: svglib + reportlab
             png_data = self._convert_svg_with_svglib(svg_content, width_val, height_val)
             if png_data:
+                logger.info(f"SVG converted successfully using svglib")
                 return self._insert_svg_as_image(png_data, width_val, height_val, "svglib")
 
-            # Fallback: cairosvg and svglib failed
-            logger.warning("SVG conversion failed: Both cairosvg and svglib not available or failed")
+            # Fallback: all methods failed
+            logger.error(f"All SVG conversion methods failed for SVG ({width}x{height})")
+            logger.debug(f"Failed SVG content preview: {svg_content[:500]}...")
             return self._create_svg_fallback_placeholder(svg_node, width, height)
 
         except Exception as e:
-            logger.error(f"Error processing SVG: {e}")
+            logger.error(f"Error processing SVG: {e}", exc_info=True)
             return None
 
     def _convert_svg_with_browser(self, svg_content: str, width_pt: float, height_pt: float) -> Optional[bytes]:

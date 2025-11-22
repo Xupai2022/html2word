@@ -272,6 +272,16 @@ class ParagraphBuilder:
         try:
             from html2word.word_builder.image_builder import ImageBuilder
 
+            # Check if SVG uses external references (icon fonts) - skip these
+            use_elements = [child for child in svg_node.children if child.tag == 'use']
+            if use_elements:
+                # Check if it references external icon
+                for use_elem in use_elements:
+                    xlink_href = use_elem.get_attribute('xlink:href') or use_elem.get_attribute('href')
+                    if xlink_href and xlink_href.startswith('#icon-'):
+                        logger.info(f"Skipping inline SVG icon reference: {xlink_href}")
+                        return
+
             # Use ImageBuilder's SVG conversion, but add to existing paragraph
             width = svg_node.get_attribute('width') or svg_node.computed_styles.get('width', '20')
             height = svg_node.get_attribute('height') or svg_node.computed_styles.get('height', '20')
@@ -280,19 +290,52 @@ class ParagraphBuilder:
             image_builder = ImageBuilder(self.document)
             svg_content = image_builder._serialize_svg_node(svg_node, width, height)
 
-            if not svg_content:
+            if not svg_content or len(svg_content) < 50:
+                logger.warning(f"SVG content too short or empty: {len(svg_content)} chars")
                 return
 
-            # Try to convert SVG to PNG
+            logger.info(f"Converting inline SVG to PNG: {width}x{height}, content length: {len(svg_content)} chars")
+
+            # Try to convert SVG to PNG - use multiple methods
+            png_data = None
+            
+            # Method 1: Try browser converter first (best for complex SVGs)
             try:
-                import cairosvg
+                width_pt = image_builder._parse_dimension(width)
+                height_pt = image_builder._parse_dimension(height)
+                png_data = image_builder._convert_svg_with_browser(svg_content, width_pt, height_pt)
+                if png_data:
+                    logger.info("Inline SVG converted using Browser")
+            except Exception as e:
+                logger.debug(f"Browser conversion failed: {e}")
+            
+            # Method 2: Try cairosvg
+            if not png_data:
+                try:
+                    import cairosvg
+                    png_data = cairosvg.svg2png(bytestring=svg_content.encode('utf-8'))
+                    logger.info("Inline SVG converted using cairosvg")
+                except ImportError:
+                    logger.warning("cairosvg not available")
+                except Exception as e:
+                    logger.warning(f"cairosvg conversion failed: {e}")
+            
+            # Method 3: Try svglib
+            if not png_data:
+                try:
+                    width_pt = image_builder._parse_dimension(width)
+                    height_pt = image_builder._parse_dimension(height)
+                    png_data = image_builder._convert_svg_with_svglib(svg_content, width_pt, height_pt)
+                    if png_data:
+                        logger.info("Inline SVG converted using svglib")
+                except Exception as e:
+                    logger.debug(f"svglib conversion failed: {e}")
+            
+            if png_data:
                 import io
                 from docx.shared import Inches
-
-                png_data = cairosvg.svg2png(bytestring=svg_content.encode('utf-8'))
+                
                 image_stream = io.BytesIO(png_data)
-
-                # Parse dimensions (use small sizes for inline SVGs)
                 width_pt = image_builder._parse_dimension(width)
                 height_pt = image_builder._parse_dimension(height)
 
@@ -304,10 +347,9 @@ class ParagraphBuilder:
                     height=Inches(height_pt / 72)
                 )
 
-                logger.debug(f"Added inline SVG as image ({width}x{height})")
-
-            except ImportError:
-                logger.warning("cairosvg not available, inline SVG skipped")
+                logger.info(f"Successfully added inline SVG as image ({width}x{height})")
+            else:
+                logger.error(f"All SVG conversion methods failed for inline SVG ({width}x{height})")
 
         except Exception as e:
-            logger.warning(f"Failed to add inline SVG: {e}")
+            logger.error(f"Failed to add inline SVG: {e}", exc_info=True)
