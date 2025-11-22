@@ -86,15 +86,18 @@ class DocumentBuilder:
         if not node.is_element:
             return
 
+        # Get tag first for position check
+        tag = node.tag
+
         # Skip elements with position: absolute or position: fixed
-        # These are typically overlay elements that don't belong in the document flow
+        # EXCEPTION: Keep SVG and IMG elements even if position: absolute
+        # These often contain important charts/diagrams despite absolute positioning
         position = node.computed_styles.get('position', '')
-        if position in ('absolute', 'fixed'):
+        if position in ('absolute', 'fixed') and tag not in ('svg', 'img'):
             logger.debug(f"Skipping {node.tag} with position: {position}")
             return
 
         # Route to appropriate builder based on tag
-        tag = node.tag
 
         # Headings
         if tag in ('h1', 'h2', 'h3', 'h4', 'h5', 'h6'):
@@ -823,17 +826,58 @@ class DocumentBuilder:
             svg_node: SVG DOM node
         """
         try:
+            # Check if this is an empty icon SVG (only contains <use> with xlink:href)
+            # These are typically font icons and don't have real SVG content
+            if self._is_empty_icon_svg(svg_node):
+                logger.debug(f"Skipping empty icon SVG (xlink:href reference only)")
+                return
+
             # Get SVG dimensions from attributes or CSS
             width = svg_node.get_attribute('width') or svg_node.computed_styles.get('width', '100')
             height = svg_node.get_attribute('height') or svg_node.computed_styles.get('height', '100')
 
+            # Log SVG info for debugging
+            logger.debug(f"Processing SVG: width={width}, height={height}, children={len(svg_node.children)}")
+
             # Convert SVG to image using ImageBuilder's SVG support
-            self.image_builder.build_svg(svg_node, width, height)
+            # This uses multiple conversion methods (browser, cairosvg, svglib)
+            result = self.image_builder.build_svg(svg_node, width, height)
+            
+            if result is None:
+                logger.warning(f"SVG conversion returned None, dimensions: {width}x{height}")
 
         except Exception as e:
-            logger.warning(f"Failed to process SVG element: {e}")
+            logger.error(f"Failed to process SVG element: {e}", exc_info=True)
             # Fallback: skip the SVG element
             pass
+
+    def _is_empty_icon_svg(self, svg_node: DOMNode) -> bool:
+        """
+        Check if SVG is an empty icon (only contains <use> with xlink:href).
+        
+        These SVGs reference external icon definitions and don't contain
+        actual graphics data, so they can't be rendered.
+        
+        Args:
+            svg_node: SVG DOM node
+            
+        Returns:
+            True if this is an empty icon SVG
+        """
+        # Check if SVG has any real content
+        if not svg_node.children:
+            return True
+        
+        # Check if only child is <use> with xlink:href (icon reference)
+        if len(svg_node.children) == 1:
+            child = svg_node.children[0]
+            if child.tag == 'use':
+                # Has xlink:href attribute - this is an icon reference
+                xlink_href = child.get_attribute('xlink:href') or child.get_attribute('href')
+                if xlink_href and xlink_href.startswith('#'):
+                    return True
+        
+        return False
 
     def save(self, output_path: str):
         """
