@@ -1,0 +1,409 @@
+"""
+CSS box model calculation.
+
+Handles calculation of element box model (margin, padding, border, content).
+"""
+
+import logging
+from typing import Dict, Any, Optional
+from dataclasses import dataclass
+from html2word.parser.dom_tree import DOMNode
+from html2word.utils.units import UnitConverter
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class BoxEdge:
+    """Represents one edge of a box (top, right, bottom, left)."""
+    top: float = 0.0
+    right: float = 0.0
+    bottom: float = 0.0
+    left: float = 0.0
+
+    def to_dict(self) -> Dict[str, float]:
+        """Convert to dictionary."""
+        return {
+            'top': self.top,
+            'right': self.right,
+            'bottom': self.bottom,
+            'left': self.left
+        }
+
+
+@dataclass
+class BorderEdge:
+    """Represents border properties for each edge."""
+    width: float = 0.0
+    style: str = 'none'
+    color: str = '#000000'
+
+
+class Border:
+    """Represents border properties."""
+    top: BorderEdge
+    right: BorderEdge
+    bottom: BorderEdge
+    left: BorderEdge
+
+    def __init__(self):
+        """Initialize border with default edges."""
+        self.top = BorderEdge()
+        self.right = BorderEdge()
+        self.bottom = BorderEdge()
+        self.left = BorderEdge()
+
+    def has_border(self) -> bool:
+        """Check if border is visible."""
+        return any([
+            self.top.width > 0 and self.top.style != 'none',
+            self.right.width > 0 and self.right.style != 'none',
+            self.bottom.width > 0 and self.bottom.style != 'none',
+            self.left.width > 0 and self.left.style != 'none'
+        ])
+
+
+class BoxModel:
+    """Represents the CSS box model for an element."""
+
+    def __init__(
+        self,
+        node: DOMNode,
+        context: Optional[Dict[str, Any]] = None
+    ):
+        """
+        Initialize box model from DOM node.
+
+        Args:
+            node: DOM node
+            context: Context for unit conversion
+        """
+        self.node = node
+        self.context = context or {}
+        self.styles = node.computed_styles
+
+        # Box model components (in pt)
+        self.margin = BoxEdge()
+        self.padding = BoxEdge()
+        self.border = Border()
+        self.width: Optional[float] = None
+        self.height: Optional[float] = None
+        self.box_sizing = 'content-box'
+
+        # Calculate box model
+        self._calculate()
+
+    def _calculate(self):
+        """Calculate all box model properties."""
+        self._calculate_margin()
+        self._calculate_padding()
+        self._calculate_border()
+        self._calculate_dimensions()
+        self._get_box_sizing()
+
+    def _calculate_margin(self):
+        """Calculate margin values."""
+        margin = self._parse_box_property('margin')
+        self.margin = BoxEdge(
+            top=margin['top'],
+            right=margin['right'],
+            bottom=margin['bottom'],
+            left=margin['left']
+        )
+
+    def _calculate_padding(self):
+        """Calculate padding values."""
+        padding = self._parse_box_property('padding')
+        self.padding = BoxEdge(
+            top=padding['top'],
+            right=padding['right'],
+            bottom=padding['bottom'],
+            left=padding['left']
+        )
+
+    def _calculate_border(self):
+        """Calculate border properties."""
+        # Border width for each side
+        border_width = self._parse_box_property('border', 'width')
+
+        # Border style for each side
+        border_style = self._parse_border_styles()
+
+        # Border color for each side
+        border_color = self._parse_border_colors()
+
+        # Set top border
+        self.border.top.width = border_width['top']
+        self.border.top.style = border_style['top']
+        self.border.top.color = border_color['top']
+
+        # Set right border
+        self.border.right.width = border_width['right']
+        self.border.right.style = border_style['right']
+        self.border.right.color = border_color['right']
+
+        # Set bottom border
+        self.border.bottom.width = border_width['bottom']
+        self.border.bottom.style = border_style['bottom']
+        self.border.bottom.color = border_color['bottom']
+
+        # Set left border
+        self.border.left.width = border_width['left']
+        self.border.left.style = border_style['left']
+        self.border.left.color = border_color['left']
+
+    def _parse_border_styles(self) -> Dict[str, str]:
+        """Parse border styles for each side."""
+        result = {'top': 'none', 'right': 'none', 'bottom': 'none', 'left': 'none'}
+
+        # Check individual side styles first
+        for side in ['top', 'right', 'bottom', 'left']:
+            key = f'border-{side}-style'
+            if key in self.styles:
+                result[side] = self.styles[key]
+
+        # Check for border-style shorthand
+        if 'border-style' in self.styles:
+            values = self.styles['border-style'].split()
+            if len(values) == 1:
+                # All sides
+                for side in result:
+                    if result[side] == 'none':
+                        result[side] = values[0]
+            elif len(values) == 2:
+                # top/bottom, left/right
+                for side in ['top', 'bottom']:
+                    if result[side] == 'none':
+                        result[side] = values[0]
+                for side in ['left', 'right']:
+                    if result[side] == 'none':
+                        result[side] = values[1]
+            elif len(values) == 3:
+                # top, left/right, bottom
+                if result['top'] == 'none':
+                    result['top'] = values[0]
+                for side in ['left', 'right']:
+                    if result[side] == 'none':
+                        result[side] = values[1]
+                if result['bottom'] == 'none':
+                    result['bottom'] = values[2]
+            elif len(values) == 4:
+                # top, right, bottom, left
+                sides = ['top', 'right', 'bottom', 'left']
+                for i, side in enumerate(sides):
+                    if result[side] == 'none':
+                        result[side] = values[i]
+
+        return result
+
+    def _parse_border_colors(self) -> Dict[str, str]:
+        """Parse border colors for each side."""
+        result = {'top': '#000000', 'right': '#000000', 'bottom': '#000000', 'left': '#000000'}
+
+        # Check individual side colors first
+        for side in ['top', 'right', 'bottom', 'left']:
+            key = f'border-{side}-color'
+            if key in self.styles:
+                result[side] = self.styles[key]
+
+        # Check for border-color shorthand
+        if 'border-color' in self.styles:
+            values = self.styles['border-color'].split()
+            if len(values) == 1:
+                # All sides
+                for side in result:
+                    if result[side] == '#000000':
+                        result[side] = values[0]
+            elif len(values) == 2:
+                # top/bottom, left/right
+                for side in ['top', 'bottom']:
+                    if result[side] == '#000000':
+                        result[side] = values[0]
+                for side in ['left', 'right']:
+                    if result[side] == '#000000':
+                        result[side] = values[1]
+            elif len(values) == 3:
+                # top, left/right, bottom
+                if result['top'] == '#000000':
+                    result['top'] = values[0]
+                for side in ['left', 'right']:
+                    if result[side] == '#000000':
+                        result[side] = values[1]
+                if result['bottom'] == '#000000':
+                    result['bottom'] = values[2]
+            elif len(values) == 4:
+                # top, right, bottom, left
+                sides = ['top', 'right', 'bottom', 'left']
+                for i, side in enumerate(sides):
+                    if result[side] == '#000000':
+                        result[side] = values[i]
+
+        return result
+
+    def _calculate_dimensions(self):
+        """Calculate width and height."""
+        # Width
+        if 'width' in self.styles:
+            self.width = UnitConverter.to_pt(self.styles['width'], self.context)
+
+        # Height
+        if 'height' in self.styles:
+            self.height = UnitConverter.to_pt(self.styles['height'], self.context)
+
+    def _get_box_sizing(self):
+        """Get box-sizing value."""
+        self.box_sizing = self.styles.get('box-sizing', 'content-box')
+
+    def _parse_box_property(
+        self,
+        prop_prefix: str,
+        prop_suffix: str = ''
+    ) -> Dict[str, float]:
+        """
+        Parse box property (margin, padding, border-width).
+
+        Args:
+            prop_prefix: Property prefix ('margin', 'padding', 'border')
+            prop_suffix: Property suffix ('', 'width', 'style', 'color')
+
+        Returns:
+            Dictionary with top, right, bottom, left values in pt
+        """
+        suffix = f'-{prop_suffix}' if prop_suffix else ''
+
+        # Try shorthand property first
+        shorthand_prop = f'{prop_prefix}{suffix}'
+        if shorthand_prop in self.styles:
+            value = self.styles[shorthand_prop]
+            # Parse shorthand value
+            parts = UnitConverter.parse_box_values(value)
+
+            # Convert to pt
+            return {
+                'top': UnitConverter.to_pt(f"{parts['top']}px", self.context) if parts['top'] else 0,
+                'right': UnitConverter.to_pt(f"{parts['right']}px", self.context) if parts['right'] else 0,
+                'bottom': UnitConverter.to_pt(f"{parts['bottom']}px", self.context) if parts['bottom'] else 0,
+                'left': UnitConverter.to_pt(f"{parts['left']}px", self.context) if parts['left'] else 0,
+            }
+
+        # Try individual properties
+        result = {}
+        for edge in ['top', 'right', 'bottom', 'left']:
+            prop_name = f'{prop_prefix}-{edge}{suffix}'
+            if prop_name in self.styles:
+                value = self.styles[prop_name]
+                result[edge] = UnitConverter.to_pt(value, self.context)
+            else:
+                result[edge] = 0.0
+
+        return result
+
+    def get_total_width(self) -> Optional[float]:
+        """
+        Calculate total width including padding and border.
+
+        Returns:
+            Total width in pt, or None if width not specified
+        """
+        if self.width is None:
+            return None
+
+        if self.box_sizing == 'border-box':
+            # Width includes padding and border
+            return self.width
+        else:
+            # Content-box: add padding and border
+            return (
+                self.width +
+                self.padding.left + self.padding.right +
+                self.border.width.left + self.border.width.right
+            )
+
+    def get_content_width(self) -> Optional[float]:
+        """
+        Calculate content width (excluding padding and border).
+
+        Returns:
+            Content width in pt, or None if width not specified
+        """
+        if self.width is None:
+            return None
+
+        if self.box_sizing == 'border-box':
+            # Subtract padding and border
+            return (
+                self.width -
+                self.padding.left - self.padding.right -
+                self.border.width.left - self.border.width.right
+            )
+        else:
+            # Content-box: width is already content width
+            return self.width
+
+    def get_total_height(self) -> Optional[float]:
+        """
+        Calculate total height including padding and border.
+
+        Returns:
+            Total height in pt, or None if height not specified
+        """
+        if self.height is None:
+            return None
+
+        if self.box_sizing == 'border-box':
+            return self.height
+        else:
+            return (
+                self.height +
+                self.padding.top + self.padding.bottom +
+                self.border.width.top + self.border.width.bottom
+            )
+
+    def get_horizontal_spacing(self) -> float:
+        """
+        Get total horizontal spacing (margin + padding + border).
+
+        Returns:
+            Total horizontal spacing in pt
+        """
+        return (
+            self.margin.left + self.margin.right +
+            self.padding.left + self.padding.right +
+            self.border.width.left + self.border.width.right
+        )
+
+    def get_vertical_spacing(self) -> float:
+        """
+        Get total vertical spacing (margin + padding + border).
+
+        Returns:
+            Total vertical spacing in pt
+        """
+        return (
+            self.margin.top + self.margin.bottom +
+            self.padding.top + self.padding.bottom +
+            self.border.width.top + self.border.width.bottom
+        )
+
+    def to_dict(self) -> Dict[str, Any]:
+        """
+        Convert box model to dictionary.
+
+        Returns:
+            Dictionary representation
+        """
+        return {
+            'margin': self.margin.to_dict(),
+            'padding': self.padding.to_dict(),
+            'border': {
+                'width': self.border.width.to_dict(),
+                'style': self.border.style,
+                'color': self.border.color
+            },
+            'width': self.width,
+            'height': self.height,
+            'box_sizing': self.box_sizing,
+            'total_width': self.get_total_width(),
+            'content_width': self.get_content_width(),
+            'total_height': self.get_total_height(),
+        }

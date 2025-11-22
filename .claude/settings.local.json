@@ -1,20 +1,13 @@
 {
   "permissions": {
     "allow": [
-      "Bash(git config:*)",
-      "Bash(git show-ref:*)",
-      "Bash(python -m html2word:*)",
+      "Bash(curl -s:*)",
+      "Bash(gh repo view starkware-libs/cairo --json description,homepageUrl)",
       "Bash(python:*)",
-      "Bash(mv:*)",
-      "Bash(pip install:*)",
-      "Bash(html2word:*)",
-      "Bash(git add:*)",
-      "Bash(git commit -m \"$(cat <<''EOF''\nfix: Remove hardcoded font settings to respect HTML/CSS fonts\n\n修复字体不一致问题 - 完全按照HTML中的CSS进行字体转换\n\n## 问题\n同一行文字（如\"2024年第三季度网络安全态势分析报告\"）存在字体不一致，\n部分文字使用了硬编码的Times New Roman字体，而非HTML中定义的字体。\n\n## 根本原因\n系统中存在多处硬编码的默认字体设置：\n1. config/default_styles.yaml - body元素硬编码 font-family 和 font-size\n2. src/html2word/style/inheritance.py - 默认继承样式硬编码字体属性\n\n## 修复内容\n\n### 核心修复（字体相关）\n- **config/default_styles.yaml**: 移除body元素的硬编码字体设置\n  - 删除 font-family: \"Times New Roman\"\n  - 删除 font-size: 16px\n  - 移除标题和段落元素的 display: block（让CSS完全控制）\n\n- **src/html2word/style/inheritance.py**: 移除默认继承样式中的字体硬编码\n  - 删除 ''font-family'': ''Times New Roman''\n  - 删除 ''font-size'': ''16px''\n  - 添加注释说明字体属性应从HTML/CSS获取\n\n### 附加改进\n- **src/html2word/parser/css_parser.py**: 改进渐变色处理逻辑\n  - 优化linear-gradient颜色提取，提供更好的视觉近似\n\n- **src/html2word/word_builder/style_mapper.py**: 增强样式支持\n  - 添加opacity支持，通过与白色背景混合实现透明度\n  - 添加box-shadow降级处理，用边框模拟阴影效果\n\n- **src/html2word/word_builder/document_builder.py**: 智能div处理\n  - 支持display:grid布局转换为表格\n  - 根据样式和内容智能决定div的处理方式\n  - 改进背景色和边框的保留\n\n## 验证结果\n✅ \"2024年第三季度网络安全态势分析报告\"字体完全一致\n✅ 所有文本完全按照HTML中的CSS字体进行转换\n✅ 字体继承机制正常工作\n✅ 不再存在硬编码字体覆盖HTML样式的情况\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude <noreply@anthropic.com>\nEOF\n)\")",
-      "Bash(git push:*)",
-      "Bash(bash -c:*)",
-      "Bash(git rm:*)",
-      "Bash(git commit -m \"$(cat <<''EOF''\nchore: 清理调试文件并添加图片测试基础设施\n\n## 变更摘要\n删除调试阶段产生的临时文件，建立完整的图片测试基础设施\n\n## 具体变更\n\n### 清理调试文件（23个文件）\n- 删除各类调试脚本：debug_*.py, test_*.py, verify_*.py\n- 删除临时报告文件：IMPROVEMENT_REPORT.md, SPACING_*.md\n- 删除对比分析脚本：compare_*.py, analyze_*.py, count_*.py\n\n### 添加图片测试基础设施（48个文件）\n- 添加图片测试文档（6个HTML）\n  - test_images_*.html - 在线/本地图片测试页面\n- 添加测试脚本（5个Python）\n  - generate_test_images.py - 生成测试用HTML文档\n  - download_test_images.py - 下载测试图片\n  - verify_*.py - 验证脚本\n  - update_html_to_local_paths.py - 路径转换工具\n  - test_all_images.py - 集成测试脚本\n- 添加测试文档（6个Markdown）\n  - test_images_*.md - 测试说明文档\n  - test_quickstart.md - 快速开始指南\n  - LOCAL_IMAGES_README.md - 本地图片说明\n- 添加测试图片（130张）\n  - images/*.jpg - 测试用的网络安全相关图片\n\n### 配置更新\n- .claude/settings.local.json: 添加bash -c命令权限\n\n## 测试验证\n- 所有图片测试文档可正常生成\n- 本地图片路径配置已完成\n- 图片测试通过验证\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude <noreply@anthropic.com>\nEOF\n)\")",
-      "Bash(git commit:*)"
+      "Bash(cd .. ls -lh:*)",
+      "Bash(python3:*)",
+      "Bash(where python:*)",
+      "Bash(git add:*)"
     ],
     "deny": [],
     "ask": []

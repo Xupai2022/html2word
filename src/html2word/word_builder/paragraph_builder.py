@@ -78,6 +78,12 @@ class ParagraphBuilder:
             if child.is_text:
                 # Add text run
                 self._add_text_run(child, paragraph)
+            elif child.tag == 'img':
+                # FIXED: Handle inline images
+                self._add_inline_image(child, paragraph)
+            elif child.tag == 'svg':
+                # FIXED: Handle inline SVG
+                self._add_inline_svg(child, paragraph)
             elif child.is_inline:
                 # Process inline element
                 self._process_inline_element(child, paragraph)
@@ -193,3 +199,157 @@ class ParagraphBuilder:
                         run.font.size = Pt(run.font.size.pt * 1.2)
 
         return paragraph
+
+    def _add_inline_image(self, img_node: DOMNode, paragraph):
+        """
+        Add inline image to paragraph run.
+
+        Args:
+            img_node: Image DOM node
+            paragraph: python-docx Paragraph object
+        """
+        try:
+            # Import image builder utilities
+            from html2word.word_builder.image_builder import ImageBuilder
+            from html2word.utils.image_utils import ImageProcessor
+            from docx.shared import Inches
+
+            # Get image source
+            image_builder = ImageBuilder(self.document)
+            src = image_builder._get_best_image_src(img_node)
+            if not src:
+                return
+
+            # Get CSS dimensions
+            css_width = img_node.computed_styles.get('width')
+            css_height = img_node.computed_styles.get('height')
+            transform = img_node.computed_styles.get('transform')
+            filter_value = img_node.computed_styles.get('filter')
+
+            # Process image
+            image_processor = ImageProcessor()
+            result = image_processor.process_image(src, transform=transform, filter_css=filter_value)
+            if not result:
+                return
+
+            image_stream, image_size = result
+
+            # Calculate size (smaller for inline images)
+            max_width_inches = 1.0  # Default max for inline images
+            max_height_inches = 0.5
+
+            if css_width:
+                from html2word.utils.units import UnitConverter
+                width_pt = UnitConverter.to_pt(css_width)
+                max_width_inches = width_pt / 72
+
+            if css_height:
+                from html2word.utils.units import UnitConverter
+                height_pt = UnitConverter.to_pt(css_height)
+                max_height_inches = height_pt / 72
+
+            display_width, display_height = image_processor.calculate_display_size(
+                image_size, css_width, css_height, max_width_inches, max_height_inches
+            )
+
+            # Add inline image to paragraph run
+            run = paragraph.add_run()
+            run.add_picture(image_stream, width=Inches(display_width), height=Inches(display_height))
+
+            logger.debug(f"Added inline image: {src} ({display_width:.2f}x{display_height:.2f} in)")
+
+        except Exception as e:
+            logger.warning(f"Failed to add inline image: {e}")
+
+    def _add_inline_svg(self, svg_node: DOMNode, paragraph):
+        """
+        Add inline SVG to paragraph run (converted to image).
+
+        Args:
+            svg_node: SVG DOM node
+            paragraph: python-docx Paragraph object
+        """
+        try:
+            from html2word.word_builder.image_builder import ImageBuilder
+
+            # Check if SVG uses external references (icon fonts) - skip these
+            use_elements = [child for child in svg_node.children if child.tag == 'use']
+            if use_elements:
+                # Check if it references external icon
+                for use_elem in use_elements:
+                    xlink_href = use_elem.get_attribute('xlink:href') or use_elem.get_attribute('href')
+                    if xlink_href and xlink_href.startswith('#icon-'):
+                        logger.info(f"Skipping inline SVG icon reference: {xlink_href}")
+                        return
+
+            # Use ImageBuilder's SVG conversion, but add to existing paragraph
+            width = svg_node.get_attribute('width') or svg_node.computed_styles.get('width', '20')
+            height = svg_node.get_attribute('height') or svg_node.computed_styles.get('height', '20')
+
+            # Get SVG content by serializing
+            image_builder = ImageBuilder(self.document)
+            svg_content = image_builder._serialize_svg_node(svg_node, width, height)
+
+            if not svg_content or len(svg_content) < 50:
+                logger.warning(f"SVG content too short or empty: {len(svg_content)} chars")
+                return
+
+            logger.info(f"Converting inline SVG to PNG: {width}x{height}, content length: {len(svg_content)} chars")
+
+            # Try to convert SVG to PNG - use multiple methods
+            png_data = None
+            
+            # Method 1: Try browser converter first (best for complex SVGs)
+            try:
+                width_pt = image_builder._parse_dimension(width)
+                height_pt = image_builder._parse_dimension(height)
+                png_data = image_builder._convert_svg_with_browser(svg_content, width_pt, height_pt)
+                if png_data:
+                    logger.info("Inline SVG converted using Browser")
+            except Exception as e:
+                logger.debug(f"Browser conversion failed: {e}")
+            
+            # Method 2: Try cairosvg
+            if not png_data:
+                try:
+                    import cairosvg
+                    png_data = cairosvg.svg2png(bytestring=svg_content.encode('utf-8'))
+                    logger.info("Inline SVG converted using cairosvg")
+                except ImportError:
+                    logger.warning("cairosvg not available")
+                except Exception as e:
+                    logger.warning(f"cairosvg conversion failed: {e}")
+            
+            # Method 3: Try svglib
+            if not png_data:
+                try:
+                    width_pt = image_builder._parse_dimension(width)
+                    height_pt = image_builder._parse_dimension(height)
+                    png_data = image_builder._convert_svg_with_svglib(svg_content, width_pt, height_pt)
+                    if png_data:
+                        logger.info("Inline SVG converted using svglib")
+                except Exception as e:
+                    logger.debug(f"svglib conversion failed: {e}")
+            
+            if png_data:
+                import io
+                from docx.shared import Inches
+                
+                image_stream = io.BytesIO(png_data)
+                width_pt = image_builder._parse_dimension(width)
+                height_pt = image_builder._parse_dimension(height)
+
+                # Add inline SVG as image in paragraph run
+                run = paragraph.add_run()
+                run.add_picture(
+                    image_stream,
+                    width=Inches(width_pt / 72),
+                    height=Inches(height_pt / 72)
+                )
+
+                logger.info(f"Successfully added inline SVG as image ({width}x{height})")
+            else:
+                logger.error(f"All SVG conversion methods failed for inline SVG ({width}x{height})")
+
+        except Exception as e:
+            logger.error(f"Failed to add inline SVG: {e}", exc_info=True)
