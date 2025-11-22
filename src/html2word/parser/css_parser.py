@@ -413,11 +413,24 @@ class CSSParser:
             # Parse stylesheet using tinycss2
             parsed_rules = tinycss2.parse_stylesheet(css_string)
 
-            for rule in parsed_rules:
+            logger.debug(f"Parsing {len(parsed_rules)} CSS rules...")
+
+            for idx, rule in enumerate(parsed_rules):
+                # Log progress for large stylesheets
+                if idx > 0 and idx % 1000 == 0:
+                    logger.info(f"Parsed {idx}/{len(parsed_rules)} CSS rules...")
+
                 if isinstance(rule, tinycss2.ast.QualifiedRule):
                     # Extract selector
                     selector_tokens = rule.prelude
                     selector = cls._serialize_value(selector_tokens).strip()
+
+                    # Skip pseudo-element selectors that don't affect Word conversion
+                    # These include ::before, ::after, :hover, :focus, etc.
+                    if any(pseudo in selector for pseudo in ['::before', '::after', ':before', ':after',
+                                                              ':hover', ':focus', ':active', ':visited',
+                                                              ':link', ':enabled', ':disabled']):
+                        continue
 
                     # Extract declarations
                     content = rule.content
@@ -439,11 +452,18 @@ class CSSParser:
                         if selector and styles:
                             rules.append((selector, styles))
 
+                # Skip @-rules that are not relevant for Word conversion
+                # This includes @font-face, @keyframes, @media, etc.
+                elif isinstance(rule, tinycss2.ast.AtRule):
+                    # Skip all @-rules as they don't directly affect Word conversion
+                    continue
+
         except Exception as e:
             logger.warning(f"Error parsing CSS stylesheet with tinycss2: {e}, falling back to simple parser")
             # Fallback to simple parsing
             rules = cls._parse_stylesheet_simple(css_string)
 
+        logger.debug(f"Extracted {len(rules)} CSS rules (filtered from original)")
         return rules
 
     @classmethod
@@ -462,12 +482,31 @@ class CSSParser:
         # Remove comments
         css_string = re.sub(r'/\*.*?\*/', '', css_string, flags=re.DOTALL)
 
+        # Remove @-rules (like @font-face, @keyframes, @media)
+        # These are not relevant for Word conversion
+        css_string = re.sub(r'@[^{]+\{[^}]*\}', '', css_string, flags=re.DOTALL)
+        # Handle nested @-rules like @media
+        css_string = re.sub(r'@[^{]+\{(?:[^{}]|\{[^}]*\})*\}', '', css_string, flags=re.DOTALL)
+
         # Match CSS rules: selector { declarations }
         rule_pattern = re.compile(r'([^{]+)\{([^}]+)\}', re.DOTALL)
 
-        for match in rule_pattern.finditer(css_string):
+        matches = list(rule_pattern.finditer(css_string))
+        logger.debug(f"Found {len(matches)} CSS rule matches in simple parser")
+
+        for idx, match in enumerate(matches):
+            # Log progress for large stylesheets
+            if idx > 0 and idx % 1000 == 0:
+                logger.info(f"Parsed {idx}/{len(matches)} CSS rules (simple parser)...")
+
             selector = match.group(1).strip()
             declarations = match.group(2).strip()
+
+            # Skip pseudo-element selectors
+            if any(pseudo in selector for pseudo in ['::before', '::after', ':before', ':after',
+                                                      ':hover', ':focus', ':active', ':visited',
+                                                      ':link', ':enabled', ':disabled']):
+                continue
 
             # Parse declarations
             styles = cls._parse_simple(declarations)
@@ -478,4 +517,5 @@ class CSSParser:
             if selector and styles:
                 rules.append((selector, styles))
 
+        logger.debug(f"Extracted {len(rules)} CSS rules from simple parser")
         return rules

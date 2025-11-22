@@ -125,6 +125,10 @@ class TableBuilder:
         # Fill cells
         for row_idx, row_node in enumerate(rows):
             word_row = table.rows[row_idx]
+
+            # Set row height based on CSS height property
+            self._apply_row_height(word_row, row_node)
+
             col_idx = 0
 
             for cell_node in row_node.children:
@@ -352,6 +356,16 @@ class TableBuilder:
                     self.style_mapper.apply_paragraph_style(paragraph, cell_styles, box_model)
                     has_content = True
 
+                elif child.tag == 'img':
+                    # FIXED: Handle images in table cells
+                    self._add_cell_image(paragraph, child)
+                    has_content = True
+
+                elif child.tag == 'svg':
+                    # FIXED: Handle SVG in table cells
+                    self._add_cell_svg(paragraph, child)
+                    has_content = True
+
                 elif child.tag in ('p', 'div'):
                     # Block element
                     if has_content:
@@ -505,6 +519,109 @@ class TableBuilder:
                 para.add_run(text)
             return None
 
+    def _add_cell_image(self, paragraph, img_node: DOMNode):
+        """
+        Add image to table cell paragraph.
+
+        Args:
+            paragraph: Word paragraph
+            img_node: Image DOM node
+        """
+        try:
+            from html2word.word_builder.image_builder import ImageBuilder
+            from html2word.utils.image_utils import ImageProcessor
+            from docx.shared import Inches
+
+            image_builder = ImageBuilder(self.document)
+            src = image_builder._get_best_image_src(img_node)
+            if not src:
+                return
+
+            # Get CSS dimensions
+            css_width = img_node.computed_styles.get('width')
+            css_height = img_node.computed_styles.get('height')
+            transform = img_node.computed_styles.get('transform')
+            filter_value = img_node.computed_styles.get('filter')
+
+            # Process image
+            image_processor = ImageProcessor()
+            result = image_processor.process_image(src, transform=transform, filter_css=filter_value)
+            if not result:
+                return
+
+            image_stream, image_size = result
+
+            # Calculate size
+            max_width_inches = 2.0  # Default max for table images
+            max_height_inches = 2.0
+
+            if css_width:
+                from html2word.utils.units import UnitConverter
+                width_pt = UnitConverter.to_pt(css_width)
+                max_width_inches = width_pt / 72
+
+            if css_height:
+                from html2word.utils.units import UnitConverter
+                height_pt = UnitConverter.to_pt(css_height)
+                max_height_inches = height_pt / 72
+
+            display_width, display_height = image_processor.calculate_display_size(
+                image_size, css_width, css_height, max_width_inches, max_height_inches
+            )
+
+            # Add image to paragraph run
+            run = paragraph.add_run()
+            run.add_picture(image_stream, width=Inches(display_width), height=Inches(display_height))
+
+            logger.debug(f"Added image to table cell: {src}")
+
+        except Exception as e:
+            logger.warning(f"Failed to add image to table cell: {e}")
+
+    def _add_cell_svg(self, paragraph, svg_node: DOMNode):
+        """
+        Add SVG to table cell paragraph (converted to image).
+
+        Args:
+            paragraph: Word paragraph
+            svg_node: SVG DOM node
+        """
+        try:
+            from html2word.word_builder.image_builder import ImageBuilder
+            import io
+            from docx.shared import Inches
+
+            image_builder = ImageBuilder(self.document)
+            width = svg_node.get_attribute('width') or svg_node.computed_styles.get('width', '100')
+            height = svg_node.get_attribute('height') or svg_node.computed_styles.get('height', '100')
+
+            svg_content = image_builder._serialize_svg_node(svg_node, width, height)
+            if not svg_content:
+                return
+
+            try:
+                import cairosvg
+                png_data = cairosvg.svg2png(bytestring=svg_content.encode('utf-8'))
+                image_stream = io.BytesIO(png_data)
+
+                width_pt = image_builder._parse_dimension(width)
+                height_pt = image_builder._parse_dimension(height)
+
+                run = paragraph.add_run()
+                run.add_picture(
+                    image_stream,
+                    width=Inches(width_pt / 72),
+                    height=Inches(height_pt / 72)
+                )
+
+                logger.debug(f"Added SVG to table cell ({width}x{height})")
+
+            except ImportError:
+                logger.warning("cairosvg not available, SVG in table cell skipped")
+
+        except Exception as e:
+            logger.warning(f"Failed to add SVG to table cell: {e}")
+
     def _apply_table_style(self, table, table_node: DOMNode):
         """
         Apply table-level styles.
@@ -521,8 +638,145 @@ class TableBuilder:
             except:
                 pass
 
+        # Apply column widths
+        self._apply_column_widths(table, table_node)
+
         # Apply table style
         try:
             table.style = 'Table Grid'
         except:
             pass
+
+    def _apply_column_widths(self, table, table_node: DOMNode):
+        """
+        Extract and apply column widths from HTML table.
+
+        Args:
+            table: python-docx Table object
+            table_node: Table DOM node
+        """
+        from html2word.utils.units import UnitConverter
+
+        # Try to extract column widths from <col> tags or first row cells
+        col_widths = self._extract_column_widths(table_node)
+
+        if not col_widths:
+            return  # No width information, use default
+
+        # Get total table width
+        box_model = table_node.layout_info.get('box_model')
+        table_width_pt = box_model.width if box_model and box_model.width else 468  # Default: 6.5 inches * 72
+
+        try:
+            # Apply widths to columns
+            for col_idx, width_info in enumerate(col_widths):
+                if col_idx >= len(table.columns):
+                    break
+
+                if width_info:
+                    width_pt = None
+
+                    # Parse width (can be px, %, pt, or just a number)
+                    if isinstance(width_info, str):
+                        if '%' in width_info:
+                            # Percentage width
+                            percent = float(width_info.rstrip('%'))
+                            width_pt = table_width_pt * (percent / 100.0)
+                        else:
+                            # Absolute width (px, pt, etc.)
+                            width_pt = UnitConverter.to_pt(width_info)
+                    elif isinstance(width_info, (int, float)):
+                        # Numeric width, assume pixels
+                        width_pt = width_info * 0.75  # px to pt
+
+                    if width_pt:
+                        table.columns[col_idx].width = Inches(width_pt / 72)
+                        logger.debug(f"Set column {col_idx} width to {width_pt}pt")
+
+        except Exception as e:
+            logger.warning(f"Error applying column widths: {e}")
+
+    def _extract_column_widths(self, table_node: DOMNode) -> List[Optional[str]]:
+        """
+        Extract column widths from <col> tags or first row cells.
+
+        Args:
+            table_node: Table DOM node
+
+        Returns:
+            List of width values (can be None for auto-width columns)
+        """
+        widths = []
+
+        # First, try to find <col> or <colgroup> tags
+        for child in table_node.children:
+            if child.tag == 'colgroup':
+                for col in child.children:
+                    if col.tag == 'col':
+                        width = col.get_attribute('width') or col.computed_styles.get('width')
+                        widths.append(width)
+            elif child.tag == 'col':
+                width = child.get_attribute('width') or child.computed_styles.get('width')
+                widths.append(width)
+
+        # If we found column definitions, return them
+        if widths:
+            return widths
+
+        # Otherwise, extract from first row cells
+        rows = self._extract_rows(table_node)
+        if not rows:
+            return []
+
+        first_row = rows[0]
+        for cell in first_row.children:
+            if cell.tag in ('td', 'th'):
+                width = cell.get_attribute('width') or cell.computed_styles.get('width')
+                widths.append(width)
+
+        return widths
+
+    def _apply_row_height(self, word_row, row_node: DOMNode):
+        """
+        Apply row height from CSS styles.
+
+        Args:
+            word_row: python-docx Row object
+            row_node: Row DOM node
+        """
+        from docx.shared import Pt
+        from docx.oxml import parse_xml
+        from docx.oxml.ns import nsdecls
+
+        # Get height from CSS
+        height_str = row_node.computed_styles.get('height')
+        if not height_str:
+            # Also check cells for height
+            for cell in row_node.children:
+                if cell.tag in ('td', 'th'):
+                    height_str = cell.computed_styles.get('height')
+                    if height_str:
+                        break
+
+        if height_str and height_str != 'auto':
+            try:
+                # Parse height value
+                from html2word.utils.units import UnitConverter
+                height_pt = UnitConverter.to_pt(height_str)
+
+                if height_pt > 0:
+                    # Set row height with 'atLeast' rule
+                    # This allows content to expand if needed but sets a minimum
+                    trPr = word_row._element.get_or_add_trPr()
+
+                    # Remove existing height if present
+                    for trHeight in trPr.findall('.//{http://schemas.openxmlformats.org/wordprocessingml/2006/main}trHeight'):
+                        trPr.remove(trHeight)
+
+                    # Add new height with atLeast rule
+                    trHeight = parse_xml(f'<w:trHeight {nsdecls("w")} w:val="{int(height_pt * 20)}" w:hRule="atLeast"/>')
+                    trPr.append(trHeight)
+
+                    logger.debug(f"Applied row height: {height_pt}pt (atLeast)")
+            except Exception as e:
+                logger.warning(f"Failed to apply row height: {e}")

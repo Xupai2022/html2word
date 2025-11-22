@@ -86,6 +86,13 @@ class DocumentBuilder:
         if not node.is_element:
             return
 
+        # Skip elements with position: absolute or position: fixed
+        # These are typically overlay elements that don't belong in the document flow
+        position = node.computed_styles.get('position', '')
+        if position in ('absolute', 'fixed'):
+            logger.debug(f"Skipping {node.tag} with position: {position}")
+            return
+
         # Route to appropriate builder based on tag
         tag = node.tag
 
@@ -136,6 +143,10 @@ class DocumentBuilder:
         # Images
         elif tag == 'img':
             self.image_builder.build_image(node)
+
+        # SVG elements
+        elif tag == 'svg':
+            self._process_svg(node)
 
         # Line break
         elif tag == 'br':
@@ -255,8 +266,10 @@ class DocumentBuilder:
 
         # Check for grid or flex with multiple children
         if 'grid' in display or 'flex' in display:
-            child_elements = [c for c in node.children if c.is_element and not c.is_inline]
-            # Only convert if has 2+ block-level children (grid items)
+            # FIXED: Count ALL element children, not just block-level
+            # In flex/grid layouts, img and svg are inline but should be treated as flex/grid items
+            child_elements = [c for c in node.children if c.is_element]
+            # Only convert if has 2+ children (grid/flex items)
             if len(child_elements) >= 2:
                 logger.debug(f"Detected {display} layout with {len(child_elements)} children, converting to table")
                 return True
@@ -282,16 +295,7 @@ class DocumentBuilder:
         if not node.computed_styles:
             return False
 
-        # Has block-level children (not simple paragraph)
-        has_block_children = any(
-            c.is_element and not c.is_inline
-            for c in node.children
-        )
-
-        if not has_block_children:
-            return False  # Simple content, can be paragraph
-
-        # Check for important visual styles
+        # Check for important visual styles FIRST
         styles = node.computed_styles
 
         # Check background property first (for gradients)
@@ -331,12 +335,20 @@ class DocumentBuilder:
         # Box shadow
         has_shadow = 'box-shadow' in styles and styles['box-shadow'] not in ('none', '')
 
-        # Only wrap if has MEANINGFUL visual styling:
-        # - Non-white background (color or gradient), OR
-        # - Significant border, OR
-        # - Box shadow (even on white background)
-        # White background alone is layout, not styling
-        return has_non_white_bg or has_border or has_shadow
+        # Check if has meaningful visual styling
+        has_visual_styling = has_non_white_bg or has_border or has_shadow
+
+        # If has visual styling, always wrap (even for simple content)
+        if has_visual_styling:
+            return True
+
+        # No visual styling - only wrap if has block-level children
+        has_block_children = any(
+            c.is_element and not c.is_inline
+            for c in node.children
+        )
+
+        return has_block_children
 
     def _convert_grid_to_table(self, grid_node: DOMNode):
         """
@@ -421,14 +433,24 @@ class DocumentBuilder:
         """
         try:
             grid_template_cols = grid_node.computed_styles.get('grid-template-columns', '')
-            child_elements = [c for c in grid_node.children if c.is_element and not c.is_inline]
+            flex_wrap = grid_node.computed_styles.get('flex-wrap', 'nowrap')
+            display = grid_node.computed_styles.get('display', '')
+
+            # FIXED: Count ALL element children (including inline like img, svg)
+            child_elements = [c for c in grid_node.children if c.is_element]
 
             if not child_elements:
                 self._process_children(grid_node)
                 return
 
-            # Determine columns
-            num_cols = self._determine_grid_columns(grid_template_cols, len(child_elements))
+            # Determine columns based on layout type
+            if 'flex' in display:
+                # For flex layouts, determine columns based on flex-wrap
+                num_cols = self._determine_flex_columns(flex_wrap, len(child_elements))
+            else:
+                # For grid layouts, use grid-template-columns
+                num_cols = self._determine_grid_columns(grid_template_cols, len(child_elements))
+
             num_rows = (len(child_elements) + num_cols - 1) // num_cols
 
             logger.debug(f"Creating smart grid table: {num_rows}×{num_cols}")
@@ -558,6 +580,7 @@ class DocumentBuilder:
 
         old_doc = self.paragraph_builder.document
         old_table_doc = self.table_builder.document
+        old_image_doc = self.image_builder.document  # Save image builder document
         old_self_doc = self.document
         old_in_cell = self.in_table_cell  # Save previous state
         old_margin_bottom = self.paragraph_builder.last_margin_bottom  # Save margin state
@@ -565,6 +588,7 @@ class DocumentBuilder:
         wrapper = CellDocumentWrapper(cell, original_doc)
         self.paragraph_builder.document = wrapper
         self.table_builder.document = wrapper
+        self.image_builder.document = wrapper  # CRITICAL: Also update image_builder to use cell context
         self.document = wrapper  # CRITICAL: Also replace self.document for grid conversion
         self.in_table_cell = True  # Mark that we're inside a cell
         self.paragraph_builder.last_margin_bottom = 0.0  # Reset margin collapse in new context
@@ -574,6 +598,7 @@ class DocumentBuilder:
         finally:
             self.paragraph_builder.document = old_doc
             self.table_builder.document = old_table_doc
+            self.image_builder.document = old_image_doc  # Restore image builder document
             self.document = old_self_doc
             self.in_table_cell = old_in_cell  # Restore previous state
             self.paragraph_builder.last_margin_bottom = old_margin_bottom  # Restore margin state
@@ -674,6 +699,32 @@ class DocumentBuilder:
         """
         pass  # Intentionally do nothing - child elements handle their own spacing
 
+    def _determine_flex_columns(self, flex_wrap: str, num_items: int) -> int:
+        """
+        Determine number of columns for flex layout based on flex-wrap.
+
+        Args:
+            flex_wrap: CSS flex-wrap value (nowrap, wrap, wrap-reverse)
+            num_items: Number of flex items
+
+        Returns:
+            Number of columns
+        """
+        if flex_wrap in ('wrap', 'wrap-reverse'):
+            # For wrapping flex, estimate columns based on square-ish layout
+            # This is a heuristic - in reality it depends on item widths
+            # Use a reasonable default that works well for most cases
+            if num_items <= 3:
+                return num_items  # Single row
+            elif num_items <= 6:
+                return 3  # 2 rows of 3
+            else:
+                return 4  # Multiple rows of 4
+        else:
+            # For nowrap (default), all items in one row
+            # Limit to 6 columns for readability
+            return min(num_items, 6)
+
     def _determine_grid_columns(self, grid_template_cols: str, num_items: int) -> int:
         """
         Determine number of columns from grid-template-columns or auto-fit/auto-fill.
@@ -763,6 +814,26 @@ class DocumentBuilder:
         # 3. Has box-shadow (for visual separation)
         # 4. Probably has max-width for centering
         return is_child_of_body and has_shadow and (has_max_width or True)
+
+    def _process_svg(self, svg_node: DOMNode):
+        """
+        Process SVG element and convert to image.
+
+        Args:
+            svg_node: SVG DOM node
+        """
+        try:
+            # Get SVG dimensions from attributes or CSS
+            width = svg_node.get_attribute('width') or svg_node.computed_styles.get('width', '100')
+            height = svg_node.get_attribute('height') or svg_node.computed_styles.get('height', '100')
+
+            # Convert SVG to image using ImageBuilder's SVG support
+            self.image_builder.build_svg(svg_node, width, height)
+
+        except Exception as e:
+            logger.warning(f"Failed to process SVG element: {e}")
+            # Fallback: skip the SVG element
+            pass
 
     def save(self, output_path: str):
         """

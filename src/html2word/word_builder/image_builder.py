@@ -5,6 +5,8 @@ Inserts images into Word documents with proper sizing.
 """
 
 import logging
+import io
+import re
 from typing import Optional
 from docx.shared import Inches
 
@@ -41,8 +43,8 @@ class ImageBuilder:
         if img_node.tag != 'img':
             return None
 
-        # Get image source
-        src = img_node.get_attribute('src')
+        # Get image source (handle srcset if present)
+        src = self._get_best_image_src(img_node)
         if not src:
             logger.warning("Image node has no src attribute")
             return None
@@ -53,24 +55,39 @@ class ImageBuilder:
         max_width = img_node.computed_styles.get('max-width')
         max_height = img_node.computed_styles.get('max-height')
 
-        # Process image
-        result = self.image_processor.process_image(src)
+        # Get CSS transform and filter for pre-processing
+        transform = img_node.computed_styles.get('transform')
+        filter_value = img_node.computed_styles.get('filter')
+
+        # Process image (with optional filters/transforms)
+        result = self.image_processor.process_image(
+            src,
+            transform=transform,
+            filter_css=filter_value
+        )
         if result is None:
             logger.error(f"Failed to process image: {src}")
-            return None
+            # Add placeholder text for failed images
+            paragraph = self.document.add_paragraph()
+            run = paragraph.add_run(f"[Image failed to load: {src[:100]}{'...' if len(src) > 100 else ''}]")
+            run.font.color.rgb = None  # Use theme color
+            run.italic = True
+            return paragraph
 
         image_stream, image_size = result
 
         # Calculate display size in inches
+        # Priority: width/height > max-width/max-height > defaults
         max_width_inches = 6.0  # Default max width (for letter size page)
         max_height_inches = 9.0  # Default max height
 
-        if max_width:
+        # Only use max-width/max-height if width/height are not specified
+        if not css_width and max_width:
             from html2word.utils.units import UnitConverter
             max_width_pt = UnitConverter.to_pt(max_width)
             max_width_inches = max_width_pt / 72
 
-        if max_height:
+        if not css_height and max_height:
             from html2word.utils.units import UnitConverter
             max_height_pt = UnitConverter.to_pt(max_height)
             max_height_inches = max_height_pt / 72
@@ -96,9 +113,310 @@ class ImageBuilder:
                 height=Inches(display_height)
             )
 
+            # Apply text alignment if specified (check both img and parent container)
+            text_align = img_node.computed_styles.get('text-align')
+            if not text_align and img_node.parent:
+                # Check parent's text-align
+                text_align = img_node.parent.computed_styles.get('text-align')
+
+            if text_align == 'center':
+                from docx.enum.text import WD_ALIGN_PARAGRAPH
+                paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            elif text_align == 'right':
+                from docx.enum.text import WD_ALIGN_PARAGRAPH
+                paragraph.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+            elif text_align == 'left':
+                from docx.enum.text import WD_ALIGN_PARAGRAPH
+                paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
+
+            # TODO: Handle float (requires more complex wrapping setup)
+            # float_val = img_node.computed_styles.get('float')
+            # if float_val in ('left', 'right'):
+            #     # Would need to set wrapping style on picture
+
             logger.debug(f"Inserted image: {src} ({display_width:.2f}x{display_height:.2f} in)")
             return picture
 
         except Exception as e:
             logger.error(f"Error inserting image {src}: {e}")
+            return None
+
+    def _get_best_image_src(self, img_node: DOMNode) -> Optional[str]:
+        """
+        Get the best image source from src or srcset attribute.
+
+        Args:
+            img_node: Image DOM node
+
+        Returns:
+            Image URL string or None
+        """
+        # Check for srcset first
+        srcset = img_node.get_attribute('srcset')
+        if srcset:
+            # Parse srcset: "url1 1x, url2 2x, url3 3x" or "url1 100w, url2 200w"
+            candidates = []
+            for item in srcset.split(','):
+                item = item.strip()
+                parts = item.rsplit(None, 1)  # Split from right, max 1 split
+
+                if len(parts) == 2:
+                    url, descriptor = parts
+                    # Extract multiplier or width
+                    if descriptor.endswith('x'):
+                        try:
+                            multiplier = float(descriptor[:-1])
+                            candidates.append((url, multiplier, 'density'))
+                        except:
+                            pass
+                    elif descriptor.endswith('w'):
+                        try:
+                            width = int(descriptor[:-1])
+                            candidates.append((url, width, 'width'))
+                        except:
+                            pass
+                elif len(parts) == 1:
+                    # No descriptor, assume 1x
+                    candidates.append((parts[0], 1.0, 'density'))
+
+            # Select best candidate
+            if candidates:
+                # Prefer 2x or 3x for better quality in print
+                density_candidates = [c for c in candidates if c[2] == 'density']
+                if density_candidates:
+                    # Sort by multiplier descending, pick highest (up to 3x)
+                    density_candidates.sort(key=lambda x: x[1], reverse=True)
+                    for url, mult, _ in density_candidates:
+                        if mult <= 3.0:  # Don't go too high
+                            logger.debug(f"Selected srcset image: {url} ({mult}x)")
+                            return url
+                    return density_candidates[0][0]  # Return highest if all > 3x
+
+                # Fall back to width-based, select largest
+                width_candidates = [c for c in candidates if c[2] == 'width']
+                if width_candidates:
+                    width_candidates.sort(key=lambda x: x[1], reverse=True)
+                    logger.debug(f"Selected srcset image: {width_candidates[0][0]} ({width_candidates[0][1]}w)")
+                    return width_candidates[0][0]
+
+        # Fall back to src attribute
+        return img_node.get_attribute('src')
+
+    def build_svg(self, svg_node: DOMNode, width: str, height: str) -> Optional[object]:
+        """
+        Convert inline SVG to image and insert.
+
+        Args:
+            svg_node: SVG DOM node
+            width: SVG width (from attribute or CSS)
+            height: SVG height (from attribute or CSS)
+
+        Returns:
+            python-docx InlineShape object or None
+        """
+        try:
+            # Get SVG content by serializing the node
+            svg_content = self._serialize_svg_node(svg_node, width, height)
+
+            if not svg_content:
+                logger.warning("Empty SVG content")
+                return None
+
+            # Convert SVG to PNG using cairosvg if available
+            try:
+                import cairosvg
+                png_data = cairosvg.svg2png(bytestring=svg_content.encode('utf-8'))
+                image_stream = io.BytesIO(png_data)
+
+                # Parse dimensions
+                width_val = self._parse_dimension(width)
+                height_val = self._parse_dimension(height)
+
+                # Insert image
+                paragraph = self.document.add_paragraph()
+                run = paragraph.add_run()
+                picture = run.add_picture(
+                    image_stream,
+                    width=Inches(width_val / 72),  # Convert to inches
+                    height=Inches(height_val / 72)
+                )
+
+                logger.debug(f"Inserted SVG as image ({width}x{height})")
+                return picture
+
+            except ImportError:
+                logger.warning("cairosvg not available, using fallback for SVG")
+                # Fallback: Create a placeholder paragraph with dimensions info
+                return self._create_svg_fallback_placeholder(svg_node, width, height)
+
+        except Exception as e:
+            logger.error(f"Error processing SVG: {e}")
+            return None
+
+    def _serialize_svg_node(self, svg_node: DOMNode, width: str, height: str) -> str:
+        """
+        Serialize SVG DOM node to SVG string.
+
+        Args:
+            svg_node: SVG DOM node
+            width: SVG width
+            height: SVG height
+
+        Returns:
+            SVG XML string
+        """
+        # Build SVG opening tag with attributes
+        attrs = []
+        attrs.append(f'width="{width}"')
+        attrs.append(f'height="{height}"')
+        attrs.append('xmlns="http://www.w3.org/2000/svg"')
+
+        # Add viewBox if present
+        viewbox = svg_node.get_attribute('viewBox')
+        if viewbox:
+            attrs.append(f'viewBox="{viewbox}"')
+
+        svg_str = f"<svg {' '.join(attrs)}>"
+
+        # Serialize children
+        svg_str += self._serialize_svg_children(svg_node)
+
+        svg_str += "</svg>"
+        return svg_str
+
+    def _serialize_svg_children(self, node: DOMNode) -> str:
+        """Recursively serialize SVG child elements."""
+        result = []
+
+        for child in node.children:
+            if child.is_text:
+                result.append(child.text or "")
+            elif child.is_element:
+                # Serialize element
+                attrs = []
+                for key, value in child.attributes.items():
+                    attrs.append(f'{key}="{value}"')
+
+                # Check for computed styles to add as inline style
+                if child.computed_styles:
+                    style_parts = []
+                    for key, value in child.computed_styles.items():
+                        style_parts.append(f"{key}:{value}")
+                    if style_parts:
+                        attrs.append(f'style="{";".join(style_parts)}"')
+
+                attrs_str = f" {' '.join(attrs)}" if attrs else ""
+
+                # Handle self-closing tags
+                if not child.children:
+                    result.append(f"<{child.tag}{attrs_str} />")
+                else:
+                    result.append(f"<{child.tag}{attrs_str}>")
+                    result.append(self._serialize_svg_children(child))
+                    result.append(f"</{child.tag}>")
+
+        return "".join(result)
+
+    def _parse_dimension(self, value: str) -> float:
+        """
+        Parse dimension string to points.
+
+        Args:
+            value: Dimension string (e.g., "100", "100px", "2in")
+
+        Returns:
+            Value in points
+        """
+        if not value:
+            return 100.0  # Default
+
+        # Remove whitespace
+        value = str(value).strip()
+
+        # If just a number, assume pixels
+        try:
+            return float(value) * 0.75  # px to pt conversion (96 DPI)
+        except:
+            pass
+
+        # Parse with unit
+        match = re.match(r'([\d.]+)(px|pt|in|cm|mm)?', value)
+        if match:
+            num = float(match.group(1))
+            unit = match.group(2) or 'px'
+
+            # Convert to points
+            if unit == 'px':
+                return num * 0.75
+            elif unit == 'pt':
+                return num
+            elif unit == 'in':
+                return num * 72
+            elif unit == 'cm':
+                return num * 28.35
+            elif unit == 'mm':
+                return num * 2.835
+
+        return 100.0  # Default
+
+    def _create_svg_fallback_placeholder(self, svg_node: DOMNode, width: str, height: str) -> Optional[object]:
+        """
+        Create a fallback placeholder for SVG when cairosvg is not available.
+
+        Args:
+            svg_node: SVG DOM node
+            width: SVG width
+            height: SVG height
+
+        Returns:
+            Placeholder paragraph or None
+        """
+        try:
+            from PIL import Image, ImageDraw
+
+            # Parse dimensions
+            width_val = int(self._parse_dimension(width))
+            height_val = int(self._parse_dimension(height))
+
+            # Create a simple placeholder image
+            img = Image.new('RGB', (width_val, height_val), color='#F0F0F0')
+            draw = ImageDraw.Draw(img)
+
+            # Draw a border
+            draw.rectangle([(0, 0), (width_val-1, height_val-1)], outline='#CCCCCC', width=2)
+
+            # Add text indicating it's a chart
+            try:
+                # Try to add text
+                text = "[Chart/SVG]"
+                bbox = draw.textbbox((0, 0), text)
+                text_width = bbox[2] - bbox[0]
+                text_height = bbox[3] - bbox[1]
+                x = (width_val - text_width) // 2
+                y = (height_val - text_height) // 2
+                draw.text((x, y), text, fill='#999999')
+            except:
+                pass  # Skip text if font not available
+
+            # Save to bytes
+            img_stream = io.BytesIO()
+            img.save(img_stream, format='PNG')
+            img_stream.seek(0)
+
+            # Insert image
+            paragraph = self.document.add_paragraph()
+            run = paragraph.add_run()
+            picture = run.add_picture(
+                img_stream,
+                width=Inches(width_val / 72),
+                height=Inches(height_val / 72)
+            )
+
+            logger.debug(f"Inserted SVG fallback placeholder ({width}x{height})")
+            return picture
+
+        except Exception as e:
+            logger.warning(f"Failed to create SVG fallback placeholder: {e}")
+            # Last resort: just add a text note
+            paragraph = self.document.add_paragraph(f"[Chart/SVG - {width}x{height}]")
             return None

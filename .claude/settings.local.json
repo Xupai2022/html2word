@@ -14,7 +14,9 @@
       "Bash(bash -c:*)",
       "Bash(git rm:*)",
       "Bash(git commit -m \"$(cat <<''EOF''\nchore: 清理调试文件并添加图片测试基础设施\n\n## 变更摘要\n删除调试阶段产生的临时文件，建立完整的图片测试基础设施\n\n## 具体变更\n\n### 清理调试文件（23个文件）\n- 删除各类调试脚本：debug_*.py, test_*.py, verify_*.py\n- 删除临时报告文件：IMPROVEMENT_REPORT.md, SPACING_*.md\n- 删除对比分析脚本：compare_*.py, analyze_*.py, count_*.py\n\n### 添加图片测试基础设施（48个文件）\n- 添加图片测试文档（6个HTML）\n  - test_images_*.html - 在线/本地图片测试页面\n- 添加测试脚本（5个Python）\n  - generate_test_images.py - 生成测试用HTML文档\n  - download_test_images.py - 下载测试图片\n  - verify_*.py - 验证脚本\n  - update_html_to_local_paths.py - 路径转换工具\n  - test_all_images.py - 集成测试脚本\n- 添加测试文档（6个Markdown）\n  - test_images_*.md - 测试说明文档\n  - test_quickstart.md - 快速开始指南\n  - LOCAL_IMAGES_README.md - 本地图片说明\n- 添加测试图片（130张）\n  - images/*.jpg - 测试用的网络安全相关图片\n\n### 配置更新\n- .claude/settings.local.json: 添加bash -c命令权限\n\n## 测试验证\n- 所有图片测试文档可正常生成\n- 本地图片路径配置已完成\n- 图片测试通过验证\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude <noreply@anthropic.com>\nEOF\n)\")",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "Bash(dir:*)",
+      "Bash(find:*)"
     ],
     "deny": [],
     "ask": []

@@ -60,13 +60,19 @@ class HTMLParser:
         # Find all <style> tags
         style_tags = soup.find_all('style')
 
-        for style_tag in style_tags:
+        logger.info(f"Found {len(style_tags)} <style> tags")
+
+        for idx, style_tag in enumerate(style_tags, 1):
             css_content = style_tag.string
             if css_content:
+                logger.info(f"Parsing <style> tag {idx}/{len(style_tags)} ({len(css_content)} characters)...")
                 self.stylesheet_manager.add_stylesheet(css_content)
-                logger.debug(f"Extracted CSS from <style> tag ({len(css_content)} characters)")
+                logger.info(f"Completed parsing <style> tag {idx}/{len(style_tags)}")
 
-        logger.debug(f"Total CSS rules extracted: {self.stylesheet_manager.get_rule_count()}")
+            # CRITICAL FIX: Remove <style> tag from DOM to prevent CSS code leaking into document
+            style_tag.decompose()
+
+        logger.info(f"Total CSS rules extracted: {self.stylesheet_manager.get_rule_count()}")
 
     def parse(self, html_content: Union[str, bytes], parser: str = "lxml") -> DOMTree:
         """
@@ -74,31 +80,40 @@ class HTMLParser:
 
         Args:
             html_content: HTML string or bytes
-            parser: BeautifulSoup parser to use ('lxml', 'html.parser', etc.)
+            parser: BeautifulSoup parser to use ('lxml', 'html.parser', etc.')
 
         Returns:
             DOMTree object
         """
+        logger.info(f"Parsing HTML content ({len(html_content)} bytes)...")
+
         try:
+            logger.info(f"Using BeautifulSoup parser: {parser}")
             soup = BeautifulSoup(html_content, parser)
+            logger.info("BeautifulSoup parsing completed")
         except Exception as e:
             logger.error(f"Error parsing HTML with {parser}: {e}")
             # Fallback to html.parser
+            logger.info("Falling back to html.parser")
             soup = BeautifulSoup(html_content, "html.parser")
+            logger.info("BeautifulSoup parsing completed (html.parser)")
 
         # Clear previous stylesheet rules
         self.stylesheet_manager.clear()
 
         # Extract and parse <style> tags first
+        logger.info("Extracting stylesheets from <style> tags...")
         self._extract_stylesheets(soup)
 
         # Build DOM tree
+        logger.info("Building DOM tree from parsed HTML...")
         root = self._build_dom_tree(soup)
         tree = DOMTree(root)
+        logger.info(f"DOM tree built with {tree.get_stats()['total_nodes']} nodes")
 
         # Apply CSS rules to the DOM tree
         if self.stylesheet_manager.get_rule_count() > 0:
-            logger.debug(f"Applying {self.stylesheet_manager.get_rule_count()} CSS rules to DOM tree")
+            logger.info(f"Applying {self.stylesheet_manager.get_rule_count()} CSS rules to DOM tree")
             self.stylesheet_manager.apply_styles_to_tree(tree.root)
 
         logger.info(f"Parsed HTML: {tree}")

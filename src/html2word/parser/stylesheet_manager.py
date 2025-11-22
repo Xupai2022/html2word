@@ -81,18 +81,33 @@ class StylesheetManager:
 
         logger.debug(f"Applied {len(matching_rules)} CSS rules to {node.tag}")
 
-    def apply_styles_to_tree(self, node: DOMNode):
+    def apply_styles_to_tree(self, node: DOMNode, _depth: int = 0, _node_count: int = 0):
         """
         Recursively apply CSS rules to entire DOM tree.
 
         Args:
             node: Root node of tree
+            _depth: Internal - current recursion depth
+            _node_count: Internal - current node count for progress logging
         """
+        # Log progress for large trees
+        if _depth == 0:
+            logger.info("Applying CSS rules to DOM tree...")
+            _node_count = [0]  # Use list to make it mutable in nested calls
+
+        if isinstance(_node_count, list):
+            _node_count[0] += 1
+            if _node_count[0] % 500 == 0:
+                logger.info(f"Applied styles to {_node_count[0]} DOM nodes...")
+
         self.apply_styles_to_node(node)
 
         # Recursively process children
         for child in node.children:
-            self.apply_styles_to_tree(child)
+            self.apply_styles_to_tree(child, _depth + 1, _node_count)
+
+        if _depth == 0 and isinstance(_node_count, list):
+            logger.info(f"Completed applying styles to {_node_count[0]} DOM nodes")
 
     def clear(self):
         """Clear all CSS rules."""
