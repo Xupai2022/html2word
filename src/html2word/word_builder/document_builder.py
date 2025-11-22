@@ -91,11 +91,17 @@ class DocumentBuilder:
 
         # Skip elements with position: absolute or position: fixed
         # EXCEPTION: Keep SVG and IMG elements even if position: absolute
+        # EXCEPTION: Keep DIV elements if they contain SVG or IMG children
         # These often contain important charts/diagrams despite absolute positioning
         position = node.computed_styles.get('position', '')
         if position in ('absolute', 'fixed') and tag not in ('svg', 'img'):
-            logger.debug(f"Skipping {node.tag} with position: {position}")
-            return
+            # For DIV elements, check if they contain SVG or IMG children before skipping
+            if tag == 'div' and self._contains_svg_or_img(node):
+                logger.debug(f"Processing {node.tag} with position: {position} because it contains SVG/IMG")
+                # Continue processing - don't skip
+            else:
+                logger.debug(f"Skipping {node.tag} with position: {position}")
+                return
 
         # Route to appropriate builder based on tag
 
@@ -850,6 +856,29 @@ class DocumentBuilder:
             logger.error(f"Failed to process SVG element: {e}", exc_info=True)
             # Fallback: skip the SVG element
             pass
+
+    def _contains_svg_or_img(self, node: DOMNode) -> bool:
+        """
+        Recursively check if a node contains SVG or IMG elements.
+        
+        This is used to preserve containers with position: absolute/fixed
+        that contain important charts/images.
+        
+        Args:
+            node: DOM node to check
+            
+        Returns:
+            True if node contains SVG or IMG elements
+        """
+        # Direct children check
+        for child in node.children:
+            if child.is_element and child.tag in ('svg', 'img'):
+                return True
+            # Recursive check for nested containers
+            if child.is_element and self._contains_svg_or_img(child):
+                return True
+        
+        return False
 
     def _is_empty_icon_svg(self, svg_node: DOMNode) -> bool:
         """
