@@ -86,12 +86,20 @@ class DocumentBuilder:
         if not node.is_element:
             return
 
+        # Debug: Log when we encounter SVG nodes
+        if node.tag == 'svg':
+            logger.debug(f"_process_node encountered SVG element")
+
         # Skip elements with position: absolute or position: fixed
         # UNLESS they contain important content (cover pages, titles, tables, etc.)
         position = node.computed_styles.get('position', '')
         if position in ('absolute', 'fixed'):
+            # SVG elements with absolute positioning are important (ECharts charts)
+            if node.tag == 'svg':
+                logger.debug(f"Processing SVG with position: {position}")
+                # Continue processing the SVG element normally
             # Check if this is a cover page or contains important structural content
-            if self._contains_important_content(node):
+            elif self._contains_important_content(node):
                 logger.debug(f"Processing {node.tag} with position: {position} because it contains important content")
                 # Process children directly, ignoring the positioning wrapper
                 self._process_children(node)
@@ -115,8 +123,12 @@ class DocumentBuilder:
 
         # Divs - intelligent handling based on layout and styles
         elif tag == 'div':
+            # Check if this div contains SVG (ECharts charts) - recursively
+            if self._contains_svg(node):
+                logger.debug(f"Div contains SVG (possibly nested), processing children directly")
+                self._process_children(node)
             # FIXED: display:grid now works correctly after removing default styles
-            if self._should_convert_to_grid_table(node):
+            elif self._should_convert_to_grid_table(node):
                 # Grid/flex layout - convert to table with horizontal layout
                 self._convert_grid_to_table_smart(node)
             elif self._should_wrap_in_styled_table(node):
@@ -289,10 +301,13 @@ class DocumentBuilder:
 
         # Recursively check if any descendant contains important tags
         def has_important_descendants(n: DOMNode) -> bool:
-            # Important tags that indicate real content
-            important_tags = {'p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'table', 'ul', 'ol', 'pre', 'blockquote'}
+            # Important tags that indicate real content (including SVG for charts)
+            important_tags = {'p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'table', 'ul', 'ol', 'pre', 'blockquote', 'svg'}
 
             if n.tag in important_tags:
+                # SVG always counts as important
+                if n.tag == 'svg':
+                    return True
                 # Check if it has actual text content (not just whitespace)
                 text_content = self._get_text_content(n).strip()
                 if text_content:
@@ -862,6 +877,24 @@ class DocumentBuilder:
         # Default
         return min(3, num_items)
 
+    def _contains_svg(self, node: DOMNode) -> bool:
+        """
+        Recursively check if a node contains SVG elements.
+
+        Args:
+            node: DOM node to check
+
+        Returns:
+            True if node or any descendants contain SVG
+        """
+        for child in node.children:
+            if child.is_element:
+                if child.tag == 'svg':
+                    return True
+                if self._contains_svg(child):
+                    return True
+        return False
+
     def _is_root_layout_container(self, node: DOMNode) -> bool:
         """
         Check if node is a root layout container (like .container) that should not be wrapped.
@@ -923,13 +956,20 @@ class DocumentBuilder:
         try:
             # Get SVG dimensions from attributes or CSS
             width = svg_node.get_attribute('width') or svg_node.computed_styles.get('width', '100')
-            height = svg_node.get_attribute('height') or svg_node.computed_styles.get('height', '100')
+            height = svg_node.get_attribute('height') or svg_node.computed_styles.get('width', '100')
+
+            logger.info(f"Processing SVG element: width={width}, height={height}")
 
             # Convert SVG to image using ImageBuilder's SVG support
-            self.image_builder.build_svg(svg_node, width, height)
+            result = self.image_builder.build_svg(svg_node, width, height)
+
+            if result:
+                logger.info(f"Successfully processed SVG element")
+            else:
+                logger.warning(f"SVG processing returned None")
 
         except Exception as e:
-            logger.warning(f"Failed to process SVG element: {e}")
+            logger.error(f"Failed to process SVG element: {e}", exc_info=True)
             # Fallback: skip the SVG element
             pass
 

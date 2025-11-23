@@ -7,7 +7,12 @@
       "Bash(cd .. ls -lh:*)",
       "Bash(python3:*)",
       "Bash(where python:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(git log:*)",
+      "Bash(tee:*)",
+      "Bash(timeout 45 python:*)",
+      "Bash(\"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe\" --version)",
+      "Bash(git reset:*)"
     ],
     "deny": [],
     "ask": []

@@ -329,9 +329,13 @@ class TableBuilder:
         else:
             paragraph = word_cell.add_paragraph()
 
-        # Apply paragraph-level styles to the first paragraph
+        # CRITICAL FIX: In table cells, do NOT apply box_model margins as paragraph spacing
+        # Table cell vertical spacing should be controlled by cell padding ONLY
+        # If we apply box_model (which includes margins), it creates extra space_after
+        # that causes table rows to be too tall
+        # Solution: Pass None for box_model to disable margin-based spacing
         box_model = cell_node.layout_info.get('box_model')
-        self.style_mapper.apply_paragraph_style(paragraph, cell_styles, box_model)
+        self.style_mapper.apply_paragraph_style(paragraph, cell_styles, box_model=None)
 
         # Check if we've added any content
         has_content = False
@@ -352,8 +356,8 @@ class TableBuilder:
                 if child.tag == 'br':
                     # Line break - add new paragraph
                     paragraph = word_cell.add_paragraph()
-                    # Apply paragraph-level styles
-                    self.style_mapper.apply_paragraph_style(paragraph, cell_styles, box_model)
+                    # Apply paragraph-level styles (NO box_model in table cells)
+                    self.style_mapper.apply_paragraph_style(paragraph, cell_styles, box_model=None)
                     has_content = True
 
                 elif child.tag == 'img':
@@ -411,8 +415,8 @@ class TableBuilder:
         merged_styles.update(node.computed_styles)
 
         # Apply paragraph-level styles
-        box_model = node.layout_info.get('box_model')
-        self.style_mapper.apply_paragraph_style(paragraph, merged_styles, box_model)
+        # CRITICAL FIX: In table cells, do NOT apply box_model to avoid extra spacing
+        self.style_mapper.apply_paragraph_style(paragraph, merged_styles, box_model=None)
 
         # Process children
         for child in node.children:

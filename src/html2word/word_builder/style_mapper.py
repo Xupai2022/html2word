@@ -101,18 +101,60 @@ class StyleMapper:
                 fmt.alignment = alignment
 
         # Line height
+        # CRITICAL FIX: Word's line_spacing behaves differently than CSS line-height
+        # - In CSS: line-height sets the HEIGHT of each line
+        # - In Word: line_spacing with Pt() sets EXTRA spacing between lines
+        # This causes table rows to have excessive vertical spacing
+        # Solution: Always convert to multiplier (relative to font size)
         if 'line-height' in styles:
             line_height = styles['line-height']
             try:
+                # CRITICAL FIX: CSS parser may have already converted line-height to pt (numeric)
+                # We need to distinguish between:
+                # 1. True multipliers (e.g., 1.5, 2.0) - typically < 3.0
+                # 2. Already-converted pt values (e.g., 16.5pt from "22px") - typically > 3.0
+                # Solution: If numeric value > 3.0, treat as pt and convert to multiplier
+
                 if isinstance(line_height, (int, float)):
-                    # Multiplier
-                    fmt.line_spacing = float(line_height)
+                    # Check if this is likely a pt value (> 3.0) or a true multiplier (<= 3.0)
+                    if line_height > 3.0:
+                        # This is likely an absolute value in pt, not a multiplier
+                        # Convert to multiplier by dividing by font size
+                        line_height_pt = float(line_height)
+                        font_size_pt = self._get_font_size_pt(styles.get('font-size', '12pt'))
+                        if not font_size_pt or font_size_pt <= 0:
+                            font_size_pt = 12.0
+
+                        multiplier = line_height_pt / font_size_pt
+                        multiplier = max(0.8, min(3.0, multiplier))
+                        fmt.line_spacing = multiplier
+                        logger.debug(f"Line-height (numeric pt): {line_height}pt ÷ font-size {font_size_pt:.1f}pt = {multiplier:.2f}x")
+                    else:
+                        # True multiplier (e.g., 1.5, 2.0)
+                        fmt.line_spacing = float(line_height)
+                        logger.debug(f"Line-height (multiplier): {line_height}x")
                 else:
-                    # Try to parse as pt
-                    pt_value = UnitConverter.to_pt(str(line_height))
-                    if pt_value:
-                        fmt.line_spacing = Pt(pt_value)
-            except:
+                    # Parse absolute value (e.g., "22px", "16pt")
+                    line_height_pt = UnitConverter.to_pt(str(line_height))
+                    if line_height_pt:
+                        # Get current font size to calculate multiplier
+                        font_size_pt = self._get_font_size_pt(styles.get('font-size', '12pt'))
+                        if not font_size_pt or font_size_pt <= 0:
+                            # Default font size if not specified
+                            font_size_pt = 12.0
+
+                        # Calculate multiplier: line_height / font_size
+                        # This matches CSS behavior where line-height: 22px with font-size: 14px = 1.57x
+                        multiplier = line_height_pt / font_size_pt
+
+                        # Clamp to reasonable range to avoid extreme values
+                        multiplier = max(0.8, min(3.0, multiplier))
+
+                        # Set as multiplier (not absolute Pt value)
+                        fmt.line_spacing = multiplier
+                        logger.debug(f"Line-height (string): {line_height} → {line_height_pt:.1f}pt ÷ font-size {font_size_pt:.1f}pt = {multiplier:.2f}x")
+            except Exception as e:
+                logger.debug(f"Error setting line-height: {e}")
                 pass
 
         # Margins (spacing) - Implement true CSS margin collapse
