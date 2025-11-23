@@ -54,6 +54,33 @@ class ImageBuilder:
         css_height = img_node.computed_styles.get('height')
         max_width = img_node.computed_styles.get('max-width')
         max_height = img_node.computed_styles.get('max-height')
+        
+        # If img has very small dimensions (like 14px from font-size inheritance)
+        # but parent container has explicit dimensions, use parent's dimensions
+        if css_width and css_height:
+            try:
+                width_val = float(css_width.replace('px', ''))
+                height_val = float(css_height.replace('px', ''))
+                
+                # If dimensions are suspiciously small (< 20px) and parent has explicit size, use parent's
+                if (width_val < 20 or height_val < 20) and img_node.parent:
+                    parent_width = img_node.parent.computed_styles.get('width')
+                    parent_height = img_node.parent.computed_styles.get('height')
+                    
+                    if parent_width and parent_height:
+                        try:
+                            parent_width_val = float(parent_width.replace('px', ''))
+                            parent_height_val = float(parent_height.replace('px', ''))
+                            
+                            # Use parent dimensions if they're reasonable (> 50px)
+                            if parent_width_val > 50 and parent_height_val > 50:
+                                logger.debug(f"Using parent dimensions ({parent_width}x{parent_height}) instead of img's tiny dimensions ({css_width}x{css_height})")
+                                css_width = parent_width
+                                css_height = parent_height
+                        except:
+                            pass
+            except:
+                pass
 
         # Get CSS transform and filter for pre-processing
         transform = img_node.computed_styles.get('transform')

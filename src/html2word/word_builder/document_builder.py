@@ -131,6 +131,11 @@ class DocumentBuilder:
             elif self._should_convert_to_grid_table(node):
                 # Grid/flex layout - convert to table with horizontal layout
                 self._convert_grid_to_table_smart(node)
+            # IMPORTANT: Check if should be paragraph BEFORE checking styled table
+            # Simple text divs with styling (like headers) should be paragraphs, not tables
+            elif self._should_treat_div_as_paragraph(node):
+                # Only inline content - treat as paragraph (paragraphs can have background/border styles too)
+                self.paragraph_builder.build_paragraph(node)
             elif self._should_wrap_in_styled_table(node):
                 # Has background/border - wrap in table to preserve styling
                 # But skip if it's a root layout container (like .container)
@@ -139,9 +144,6 @@ class DocumentBuilder:
                     self._process_children(node)
                 else:
                     self._wrap_div_in_styled_table(node)
-            elif self._should_treat_div_as_paragraph(node):
-                # Only inline content - treat as paragraph
-                self.paragraph_builder.build_paragraph(node)
             else:
                 # Plain container - process children directly
                 # NO spacing needed: child elements handle their own margins via space_after
