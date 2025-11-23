@@ -87,11 +87,18 @@ class DocumentBuilder:
             return
 
         # Skip elements with position: absolute or position: fixed
-        # These are typically overlay elements that don't belong in the document flow
+        # UNLESS they contain important content (cover pages, titles, tables, etc.)
         position = node.computed_styles.get('position', '')
         if position in ('absolute', 'fixed'):
-            logger.debug(f"Skipping {node.tag} with position: {position}")
-            return
+            # Check if this is a cover page or contains important structural content
+            if self._contains_important_content(node):
+                logger.debug(f"Processing {node.tag} with position: {position} because it contains important content")
+                # Process children directly, ignoring the positioning wrapper
+                self._process_children(node)
+                return
+            else:
+                logger.debug(f"Skipping {node.tag} with position: {position}")
+                return
 
         # Route to appropriate builder based on tag
         tag = node.tag
@@ -103,6 +110,7 @@ class DocumentBuilder:
 
         # Paragraphs
         elif tag in ('p', 'blockquote', 'pre'):
+            logger.debug(f"Building paragraph for <{tag}>, text: {node.get_text_content()[:50] if hasattr(node, 'get_text_content') else 'N/A'}")
             self.paragraph_builder.build_paragraph(node)
 
         # Divs - intelligent handling based on layout and styles
@@ -249,6 +257,78 @@ class DocumentBuilder:
         # Empty or only whitespace - treat as container (will be skipped)
         return False
 
+    def _contains_important_content(self, node: DOMNode) -> bool:
+        """
+        Check if a node contains important structural content that should be preserved
+        even if the node itself has position: absolute/fixed.
+
+        This is used to preserve cover pages, titles, and tables that use absolute
+        positioning for layout purposes.
+
+        Args:
+            node: DOM node to check
+
+        Returns:
+            True if node contains important content
+        """
+        # Check if node has classes that indicate it's a cover page or important container
+        class_attr = node.attributes.get('class', '')
+        if isinstance(class_attr, list):
+            node_classes = class_attr
+        else:
+            node_classes = class_attr.split() if class_attr else []
+        important_classes = [
+            'cover-info--wrapper',  # Cover page wrapper
+            'cover-info--title',    # Cover title
+            'cover-info-table',     # Cover table
+            'export-report__cover', # Export report cover
+        ]
+
+        if any(cls in node_classes for cls in important_classes):
+            return True
+
+        # Recursively check if any descendant contains important tags
+        def has_important_descendants(n: DOMNode) -> bool:
+            # Important tags that indicate real content
+            important_tags = {'p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'table', 'ul', 'ol', 'pre', 'blockquote'}
+
+            if n.tag in important_tags:
+                # Check if it has actual text content (not just whitespace)
+                text_content = self._get_text_content(n).strip()
+                if text_content:
+                    return True
+
+            # Check children
+            for child in n.children:
+                if child.is_element and has_important_descendants(child):
+                    return True
+
+            return False
+
+        return has_important_descendants(node)
+
+    def _get_text_content(self, node: DOMNode) -> str:
+        """
+        Get all text content from a node and its descendants.
+
+        Args:
+            node: DOM node
+
+        Returns:
+            Concatenated text content
+        """
+        if node.is_text:
+            return node.text
+
+        text_parts = []
+        for child in node.children:
+            if child.is_text:
+                text_parts.append(child.text)
+            elif child.is_element:
+                text_parts.append(self._get_text_content(child))
+
+        return ''.join(text_parts)
+
     def _should_convert_to_grid_table(self, node: DOMNode) -> bool:
         """
         Check if div uses grid/flex layout and should be converted to table.
@@ -320,14 +400,32 @@ class DocumentBuilder:
 
             if not is_white:
                 has_non_white_bg = True
+                logger.debug(f"Has non-white background: {bg_color}")
+            else:
+                logger.debug(f"Ignoring white background: {bg_color}")
 
-        # Borders - only count if it's a full border or prominent styling
+        # Borders - only count if it's a full border with non-white color
         has_border = False
-        border_count = sum(
-            1 for side in ['top', 'right', 'bottom', 'left']
-            if f'border-{side}-width' in styles and
-            styles.get(f'border-{side}-width', '0') not in ('0', '0px', 'none')
-        )
+        border_count = 0
+        for side in ['top', 'right', 'bottom', 'left']:
+            width_key = f'border-{side}-width'
+            color_key = f'border-{side}-color'
+
+            # Check if border exists (non-zero width)
+            if width_key in styles and styles.get(width_key, '0') not in ('0', '0px', 'none'):
+                # Check if border color is not white/transparent
+                border_color = styles.get(color_key, '').lower()
+                is_white_border = (
+                    border_color in ('', 'transparent', '#fff', '#ffffff', 'white',
+                                   'rgb(255,255,255)', 'rgb(255, 255, 255)') or
+                    border_color.startswith('#fff') or
+                    'rgb(255,255,255)' in border_color.replace(' ', '')
+                )
+
+                # Only count non-white borders
+                if not is_white_border:
+                    border_count += 1
+
         # Only consider it styled if it has 3+ sides bordered (like a box)
         if border_count >= 3:
             has_border = True

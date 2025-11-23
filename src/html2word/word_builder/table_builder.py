@@ -634,9 +634,30 @@ class TableBuilder:
         box_model = table_node.layout_info.get('box_model')
         if box_model and box_model.width:
             try:
-                table.width = Inches(box_model.width / 72)  # pt to inches
-            except:
-                pass
+                from docx.oxml.ns import qn
+
+                width_pt = box_model.width  # Already in pt
+                width_dxa = int(width_pt / 72 * 1440)  # pt to DXA (twentieths of a point)
+
+                # Get or create tblW element
+                tbl = table._element
+                tblPr = tbl.tblPr
+                tblW = tblPr.find(qn('w:tblW'))
+
+                if tblW is not None:
+                    # Modify existing tblW
+                    tblW.set(qn('w:w'), str(width_dxa))
+                    tblW.set(qn('w:type'), 'dxa')
+                else:
+                    # Create new tblW (should not happen, but just in case)
+                    from docx.oxml import parse_xml
+                    from docx.oxml.ns import nsdecls
+                    tblW = parse_xml(f'<w:tblW {nsdecls("w")} w:w="{width_dxa}" w:type="dxa"/>')
+                    tblPr.append(tblW)
+
+                logger.debug(f"Set table width to {width_pt}pt = {width_pt/72:.2f}\" = {width_dxa} dxa")
+            except Exception as e:
+                logger.warning(f"Failed to set table width: {e}")
 
         # Apply column widths
         self._apply_column_widths(table, table_node)
@@ -668,7 +689,11 @@ class TableBuilder:
         table_width_pt = box_model.width if box_model and box_model.width else 468  # Default: 6.5 inches * 72
 
         try:
-            # Apply widths to columns
+            # First pass: convert all widths to pt and count auto-width columns
+            widths_pt = []
+            auto_count = 0
+            fixed_total = 0.0
+
             for col_idx, width_info in enumerate(col_widths):
                 if col_idx >= len(table.columns):
                     break
@@ -690,8 +715,31 @@ class TableBuilder:
                         width_pt = width_info * 0.75  # px to pt
 
                     if width_pt:
-                        table.columns[col_idx].width = Inches(width_pt / 72)
-                        logger.debug(f"Set column {col_idx} width to {width_pt}pt")
+                        widths_pt.append(width_pt)
+                        fixed_total += width_pt
+                    else:
+                        widths_pt.append(None)
+                        auto_count += 1
+                else:
+                    widths_pt.append(None)
+                    auto_count += 1
+
+            # Calculate auto-width columns (distribute remaining width equally)
+            auto_width_pt = None
+            if auto_count > 0:
+                remaining = table_width_pt - fixed_total
+                auto_width_pt = max(remaining / auto_count, 50)  # Min 50pt per column
+                logger.debug(f"Auto-width columns: {auto_count}, each gets {auto_width_pt:.1f}pt (remaining: {remaining:.1f}pt from total: {table_width_pt}pt)")
+
+            # Second pass: apply widths
+            for col_idx, width_pt in enumerate(widths_pt):
+                if col_idx >= len(table.columns):
+                    break
+
+                final_width = width_pt if width_pt is not None else auto_width_pt
+                if final_width:
+                    table.columns[col_idx].width = Inches(final_width / 72)
+                    logger.debug(f"Set column {col_idx} width to {final_width:.1f}pt ({'fixed' if width_pt else 'auto'})")
 
         except Exception as e:
             logger.warning(f"Error applying column widths: {e}")
@@ -731,7 +779,21 @@ class TableBuilder:
         first_row = rows[0]
         for cell in first_row.children:
             if cell.tag in ('td', 'th'):
-                width = cell.get_attribute('width') or cell.computed_styles.get('width')
+                # Only use explicitly set widths (from width attribute or inline style)
+                # Don't use computed_styles.get('width') as it may contain browser defaults
+                width_attr = cell.get_attribute('width')
+
+                # Check inline style for width
+                style_attr = cell.get_attribute('style')
+                width_from_style = None
+                if style_attr and 'width' in style_attr:
+                    # Parse inline style to extract width
+                    import re
+                    match = re.search(r'width\s*:\s*([^;]+)', style_attr)
+                    if match:
+                        width_from_style = match.group(1).strip()
+
+                width = width_attr or width_from_style
                 widths.append(width)
 
         return widths
