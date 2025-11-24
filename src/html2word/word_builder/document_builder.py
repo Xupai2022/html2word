@@ -191,8 +191,21 @@ class DocumentBuilder:
         elif tag == 'hr':
             self._add_horizontal_rule()
 
-        # Container elements - process children directly
-        elif tag in ('body', 'html', 'main', 'article', 'section', 'header', 'footer', 'nav', 'aside'):
+        # Section elements - check for grid/flex layout or border/background styling
+        elif tag == 'section':
+            # Check if section uses grid/flex layout (same logic as div)
+            if self._should_convert_to_grid_table(node):
+                self._convert_grid_to_table_smart(node)
+            # Check if section has visual styling that requires table wrapper
+            elif self._should_wrap_in_styled_table(node):
+                self._wrap_div_in_styled_table(node)
+            else:
+                # Plain container - process children directly
+                # Child sections with borders will be handled by their own processing
+                self._process_children(node)
+
+        # Other container elements - process children directly
+        elif tag in ('body', 'html', 'main', 'article', 'header', 'footer', 'nav', 'aside'):
             # NO spacing needed: child elements handle their own margins via space_after
             # This implements CSS margin collapse behavior naturally
             self._process_children(node)
@@ -361,7 +374,7 @@ class DocumentBuilder:
 
     def _should_convert_to_grid_table(self, node: DOMNode) -> bool:
         """
-        Check if div uses grid/flex layout and should be converted to table.
+        Check if div/section uses grid/flex layout and should be converted to table.
 
         Args:
             node: DOM node
@@ -383,8 +396,50 @@ class DocumentBuilder:
             if len(child_elements) >= 2:
                 logger.debug(f"Detected {display} layout with {len(child_elements)} children, converting to table")
                 return True
+            elif len(child_elements) == 1:
+                logger.debug(f"Skipping {display} layout with only 1 child (tag={node.tag})")
 
         return False
+
+    def _has_significant_border(self, node: DOMNode) -> bool:
+        """
+        Check if element has a significant visible border.
+
+        Args:
+            node: DOM node
+
+        Returns:
+            True if has visible border
+        """
+        if not node.computed_styles:
+            return False
+
+        styles = node.computed_styles
+        border_count = 0
+
+        # Check each side for non-zero, non-white border
+        for side in ['top', 'right', 'bottom', 'left']:
+            width_key = f'border-{side}-width'
+            color_key = f'border-{side}-color'
+            style_key = f'border-{side}-style'
+
+            # Check if border exists (non-zero width and not 'none' style)
+            if width_key in styles and styles.get(width_key, '0') not in ('0', '0px', 'none'):
+                if style_key in styles and styles.get(style_key, 'none') != 'none':
+                    # Check if border color is not white/transparent
+                    border_color = styles.get(color_key, '').lower()
+                    is_white_border = (
+                        border_color in ('', 'transparent', '#fff', '#ffffff', 'white',
+                                       'rgb(255,255,255)', 'rgb(255, 255, 255)') or
+                        border_color.startswith('#fff') or
+                        'rgb(255,255,255)' in border_color.replace(' ', '')
+                    )
+
+                    if not is_white_border:
+                        border_count += 1
+
+        # Consider it significant if 3+ sides have visible borders
+        return border_count >= 3
 
     def _should_wrap_in_styled_table(self, node: DOMNode) -> bool:
         """
@@ -396,11 +451,16 @@ class DocumentBuilder:
         Returns:
             True if needs table wrapper for styling
         """
-        # CRITICAL: If already inside a table cell, do NOT wrap in another table
-        # This prevents nested table creation and eliminates duplicate spacing
+        # CRITICAL: If already inside a table cell, generally do NOT wrap in another table
+        # EXCEPT for section elements with significant borders that need to be displayed
         if self.in_table_cell:
-            logger.debug(f"Skipping table wrap for {node.tag} (already in cell)")
-            return False
+            # For section elements with clear borders, allow nested table wrapping
+            if node.tag == 'section' and self._has_significant_border(node):
+                logger.debug(f"Allowing nested table wrap for section with significant border (classes={node.attributes.get('class', [])})")
+                # Continue to check for styling
+            else:
+                logger.debug(f"Skipping table wrap for {node.tag} (already in cell)")
+                return False
 
         if not node.computed_styles:
             return False
@@ -946,6 +1006,8 @@ class DocumentBuilder:
                             mapper = StyleMapper()
                             # Calculate box model from child element to get padding, borders
                             box_model = BoxModel(child)
+                            logger.debug(f"Applying styles for grid child: {child.tag} with classes={child.attributes.get('class', [])}")
+                            logger.debug(f"  Border: top={box_model.border.top.color}, right={box_model.border.right.color}")
                             mapper.apply_table_cell_style(cell, child.computed_styles, box_model)
 
                         # Recursively process child content in cell context
@@ -1075,13 +1137,13 @@ class DocumentBuilder:
 
     def _wrap_div_in_styled_table(self, node: DOMNode):
         """
-        Wrap a styled div in a single-cell table to preserve background/borders.
+        Wrap a styled div/section in a single-cell table to preserve background/borders.
 
         Args:
-            node: DOM node with styling
+            node: DOM node with styling (div, section, etc.)
         """
         try:
-            logger.debug("Wrapping styled div in table")
+            logger.debug(f"Wrapping styled {node.tag} in table (classes={node.attributes.get('class', [])})")
 
             # Create 1x1 table (no spacing before - previous element's space_after handles that)
             table = self.document.add_table(rows=1, cols=1)
