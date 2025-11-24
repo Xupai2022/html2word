@@ -12,7 +12,10 @@
       "Bash(tee:*)",
       "Bash(timeout 45 python:*)",
       "Bash(\"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe\" --version)",
-      "Bash(git reset:*)"
+      "Bash(git reset:*)",
+      "Bash(timeout 60 python:*)",
+      "Bash(timeout 5 bash:*)",
+      "Bash(git rm:*)"
     ],
     "deny": [],
     "ask": []

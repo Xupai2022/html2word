@@ -98,6 +98,10 @@ class DocumentBuilder:
             if node.tag == 'svg':
                 logger.debug(f"Processing SVG with position: {position}")
                 # Continue processing the SVG element normally
+            # Check if element has background-image (important visual content)
+            elif self._has_background_image_in_inline_styles(node):
+                logger.info(f"Processing {node.tag} with position: {position} because it has background-image")
+                # Continue processing normally (don't return)
             # Check if this is a cover page or contains important structural content
             elif self._contains_important_content(node):
                 logger.debug(f"Processing {node.tag} with position: {position} because it contains important content")
@@ -123,8 +127,17 @@ class DocumentBuilder:
 
         # Divs - intelligent handling based on layout and styles
         elif tag == 'div':
+            # IMPORTANT: Check background-image FIRST, before SVG check
+            # If div has background-image, it should be converted as a whole (including any SVG children)
+            if self._has_background_image(node):
+                logger.debug(f"Div has background-image, converting to screenshot")
+                success = self._convert_background_image_element(node)
+                if not success:
+                    # Fallback: process children if conversion fails
+                    logger.warning("Background-image conversion failed, falling back to children processing")
+                    self._process_children(node)
             # Check if this div contains SVG (ECharts charts) - recursively
-            if self._contains_svg(node):
+            elif self._contains_svg(node):
                 logger.debug(f"Div contains SVG (possibly nested), processing children directly")
                 self._process_children(node)
             # FIXED: display:grid now works correctly after removing default styles
@@ -464,6 +477,221 @@ class DocumentBuilder:
         )
 
         return has_block_children
+
+    def _has_background_image_in_inline_styles(self, node: DOMNode) -> bool:
+        """
+        Check if element has background-image in inline_styles.
+
+        This is used for position: absolute elements before computed_styles are available.
+
+        Args:
+            node: DOM node
+
+        Returns:
+            True if has valid background-image in inline_styles
+        """
+        if not hasattr(node, 'inline_styles') or not node.inline_styles:
+            return False
+
+        bg_image = node.inline_styles.get('background-image', '')
+        if bg_image and bg_image not in ('', 'none', 'initial', 'inherit') and 'url(' in bg_image:
+            return True
+
+        return False
+
+    def _has_background_image(self, node: DOMNode) -> bool:
+        """
+        Check if element has a background-image that needs special handling.
+
+        Args:
+            node: DOM node
+
+        Returns:
+            True if has valid background-image
+        """
+        if not node.computed_styles:
+            return False
+
+        bg_image = node.computed_styles.get('background-image', '')
+
+        # Fallback: check inline_styles if not in computed_styles
+        if not bg_image and hasattr(node, 'inline_styles') and node.inline_styles:
+            bg_image = node.inline_styles.get('background-image', '')
+
+        if not bg_image or bg_image in ('', 'none', 'initial', 'inherit'):
+            return False
+
+        # Check if it's a valid image URL (data URI or external URL)
+        if 'url(' in bg_image:
+            return True
+
+        return False
+
+    def _serialize_element_to_html(self, node: DOMNode) -> str:
+        """
+        Serialize a DOM element and its children to HTML string with inline styles.
+
+        Args:
+            node: DOM node to serialize
+
+        Returns:
+            HTML string
+        """
+        if node.is_text:
+            return node.text or ""
+
+        if not node.is_element:
+            return ""
+
+        # Build opening tag with attributes and inline styles
+        tag = node.tag
+        attrs = []
+
+        # Add existing attributes (excluding style, we'll rebuild it)
+        for key, value in node.attributes.items():
+            if key != 'style':
+                attrs.append(f'{key}="{value}"')
+
+        # Build inline style from inline_styles (NOT computed_styles to avoid bloat)
+        # Only use inline_styles which contain the original style attribute
+        if hasattr(node, 'inline_styles') and node.inline_styles:
+            style_parts = []
+            for key, value in node.inline_styles.items():
+                style_parts.append(f"{key}: {value}")
+            if style_parts:
+                attrs.append(f'style="{"; ".join(style_parts)}"')
+
+        attrs_str = f" {' '.join(attrs)}" if attrs else ""
+
+        # Serialize children recursively
+        children_html = ""
+        for child in node.children:
+            children_html += self._serialize_element_to_html(child)
+
+        # Return complete HTML
+        if not children_html and tag in ('img', 'br', 'hr', 'input', 'meta', 'link'):
+            # Self-closing tags
+            return f"<{tag}{attrs_str} />"
+        else:
+            return f"<{tag}{attrs_str}>{children_html}</{tag}>"
+
+    def _convert_background_image_element(self, node: DOMNode) -> bool:
+        """
+        Convert an element with background-image to an embedded image.
+
+        Extracts base64 image data from background-image CSS property and
+        inserts it directly into Word document.
+
+        Args:
+            node: DOM node with background-image
+
+        Returns:
+            True if conversion succeeded, False otherwise
+        """
+        try:
+            import base64
+            import re
+            import io
+            from docx.shared import Inches
+            from html2word.utils.units import UnitConverter
+
+            # Get background-image from computed_styles or inline_styles
+            bg_image = node.computed_styles.get('background-image', '')
+            if not bg_image and hasattr(node, 'inline_styles'):
+                bg_image = node.inline_styles.get('background-image', '')
+
+            if not bg_image or 'url(' not in bg_image:
+                logger.warning("No valid background-image found")
+                return False
+
+            # Extract data URI from url(data:image/png;base64,...)
+            match = re.search(r'url\(["\']?data:image/([^;]+);base64,([^)"\'\s]+)', bg_image)
+            if not match:
+                logger.warning("Background-image is not a base64 data URI")
+                return False
+
+            image_format = match.group(1)  # e.g., 'png', 'jpeg'
+            base64_data = match.group(2)
+
+            logger.debug(f"Extracting {image_format} image from background-image ({len(base64_data)} base64 chars)")
+
+            # Decode base64 to binary
+            image_data = base64.b64decode(base64_data)
+            logger.debug(f"Decoded image size: {len(image_data)} bytes")
+
+            # Get element dimensions, fallback to inline_styles if needed
+            width_str = node.computed_styles.get('width') or \
+                       (node.inline_styles.get('width') if hasattr(node, 'inline_styles') else None) or \
+                       '800px'
+            height_str = node.computed_styles.get('height') or \
+                        (node.inline_styles.get('height') if hasattr(node, 'inline_styles') else None) or \
+                        '400px'
+
+            width_pt = UnitConverter.to_pt(width_str)
+            height_pt = UnitConverter.to_pt(height_str)
+
+            # Get actual image dimensions for aspect ratio calculation
+            from PIL import Image
+            image_stream_temp = io.BytesIO(image_data)
+            img = Image.open(image_stream_temp)
+            actual_width_px, actual_height_px = img.size
+            aspect_ratio = actual_width_px / actual_height_px
+
+            # If width is 0 or auto, calculate from height and aspect ratio
+            if width_pt == 0 or width_str.lower() in ('auto', 'none'):
+                if height_pt > 0:
+                    # Use height and maintain aspect ratio
+                    width_pt = height_pt * aspect_ratio
+                else:
+                    # Both auto, use actual dimensions (converted to pt)
+                    width_pt = actual_width_px * 72 / 96
+                    height_pt = actual_height_px * 72 / 96
+
+                logger.debug(f"Calculated dimensions from aspect ratio: {width_pt:.1f}x{height_pt:.1f}pt (ratio={aspect_ratio:.2f})")
+
+            # Limit to page width (A4: 595pt, with margins ~500pt usable)
+            max_width_pt = 500  # Maximum usable width in Word document
+            if width_pt > max_width_pt:
+                # Scale down to fit page width while maintaining aspect ratio
+                scale_factor = max_width_pt / width_pt
+                width_pt = max_width_pt
+                height_pt = height_pt * scale_factor
+                logger.debug(f"Scaled down to fit page: {width_pt:.1f}x{height_pt:.1f}pt")
+
+            # Insert image into document
+            image_stream = io.BytesIO(image_data)
+            paragraph = self.document.add_paragraph()
+            run = paragraph.add_run()
+            picture = run.add_picture(
+                image_stream,
+                width=Inches(width_pt / 72)
+            )
+
+            # Apply text alignment
+            text_align = node.computed_styles.get('text-align', '')
+            if text_align == 'center':
+                from docx.enum.text import WD_ALIGN_PARAGRAPH
+                paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            elif text_align == 'right':
+                from docx.enum.text import WD_ALIGN_PARAGRAPH
+                paragraph.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+
+            logger.info(f"Successfully inserted background-image ({width_pt:.1f}x{height_pt:.1f}pt, {len(image_data)} bytes)")
+
+            # Process absolutely positioned text children as separate paragraphs
+            # (Word doesn't support text overlays on images)
+            for child in node.children:
+                if child.is_element:
+                    text_content = child.get_text_content() if hasattr(child, 'get_text_content') else ''
+                    if text_content.strip():
+                        text_para = self.document.add_paragraph(text_content.strip())
+                        logger.debug(f"Added text overlay as paragraph: {text_content.strip()[:50]}")
+
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to convert background-image element: {e}", exc_info=True)
+            return False
 
     def _convert_grid_to_table(self, grid_node: DOMNode):
         """
