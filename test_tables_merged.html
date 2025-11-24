@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <style>
+        table { border-collapse: collapse; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+        .el-table__header { }
+        .el-table__body { }
+    </style>
+</head>
+<body>
+    <div>
+        <p>Security devices are the first line of defense against attacks, so ensuring their effectiveness is crucial. During this period, we checked 2 devices and found 7 with risky policy configurations.</p>
+
+        <!-- Wrap tables in divs similar to Element UI structure -->
+        <div class="el-table">
+            <div class="el-table__header-wrapper">
+                <table class="el-table__header">
+                    <colgroup>
+                        <col width="236">
+                        <col width="293">
+                        <col width="164">
+                        <col width="0" class="gutter">
+                    </colgroup>
+                    <thead>
+                        <tr>
+                            <th>Device Name</th>
+                            <th>Device Type</th>
+                            <th>Checked Items (Risks)</th>
+                            <th class="gutter"></th>
+                        </tr>
+                    </thead>
+                </table>
+            </div>
+            <div class="el-table__body-wrapper">
+                <table class="el-table__body">
+                    <colgroup>
+                        <col width="236">
+                        <col width="293">
+                        <col width="164">
+                    </colgroup>
+                    <tbody>
+                        <tr>
+                            <td>test</td>
+                            <td>Athena NGFW</td>
+                            <td>1</td>
+                        </tr>
+                        <tr>
+                            <td>ngfw-31</td>
+                            <td>NGSOC_CentOS_Intel_Svr</td>
+                            <td>6</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

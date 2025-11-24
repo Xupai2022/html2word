@@ -134,7 +134,7 @@ class DocumentBuilder:
             if isinstance(div_classes, list):
                 div_classes = ' '.join(div_classes)
 
-            if any(cls in div_classes for cls in ['el-table__header-wrapper', 'el-table__body-wrapper',
+            if any(cls in div_classes for cls in ['el-table', 'el-table__header-wrapper', 'el-table__body-wrapper',
                                                      'el-table__fixed-wrapper', 'el-table__fixed-header-wrapper',
                                                      'el-table__fixed-body-wrapper', 'el-table__append-wrapper',
                                                      'el-table__empty-wrapper']):
@@ -575,13 +575,9 @@ class DocumentBuilder:
         if has_visual_styling:
             return True
 
-        # No visual styling - only wrap if has block-level children
-        has_block_children = any(
-            c.is_element and not c.is_inline
-            for c in node.children
-        )
-
-        return has_block_children
+        # No visual styling - don't wrap plain containers
+        # Tables and other block elements can handle their own layout
+        return False
 
     def _has_background_image_in_inline_styles(self, node: DOMNode) -> bool:
         """

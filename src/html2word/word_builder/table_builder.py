@@ -800,7 +800,9 @@ class TableBuilder:
             try:
                 from docx.oxml.ns import qn
 
-                width_pt = box_model.width  # Already in pt
+                # Limit table width to maximum page width (6.5 inches = 468pt)
+                max_table_width_pt = 468
+                width_pt = min(box_model.width, max_table_width_pt)  # Ensure it doesn't exceed page width
                 width_dxa = int(width_pt / 72 * 1440)  # pt to DXA (twentieths of a point)
 
                 # Get or create tblW element
@@ -834,7 +836,10 @@ class TableBuilder:
 
     def _apply_column_widths(self, table, table_node: DOMNode):
         """
-        Extract and apply column widths from HTML table.
+        Extract and apply column widths from HTML table with proportional scaling.
+
+        This method ensures table columns fit within the Word page width while
+        maintaining the relative proportions from the HTML source.
 
         Args:
             table: python-docx Table object
@@ -848,62 +853,115 @@ class TableBuilder:
         if not col_widths:
             return  # No width information, use default
 
-        # Get total table width
+        # Get total table width - default to 6.5 inches for standard Word page with margins
         box_model = table_node.layout_info.get('box_model')
-        table_width_pt = box_model.width if box_model and box_model.width else 468  # Default: 6.5 inches * 72
+        # Maximum usable width in Word (6.5 inches = 468 pt for standard page)
+        max_table_width_pt = 468
+
+        # If box model specifies a width, use the smaller of specified width and max width
+        if box_model and box_model.width:
+            table_width_pt = min(box_model.width, max_table_width_pt)
+        else:
+            table_width_pt = max_table_width_pt
 
         try:
-            # First pass: convert all widths to pt and count auto-width columns
-            widths_pt = []
-            auto_count = 0
-            fixed_total = 0.0
+            # First pass: collect all HTML widths and calculate proportions
+            html_widths = []
+            total_html_width = 0.0
+            has_widths = False
 
             for col_idx, width_info in enumerate(col_widths):
                 if col_idx >= len(table.columns):
                     break
 
                 if width_info:
-                    width_pt = None
+                    width_value = None
 
                     # Parse width (can be px, %, pt, or just a number)
                     if isinstance(width_info, str):
                         if '%' in width_info:
-                            # Percentage width
+                            # For percentage, convert to absolute value based on HTML table width
                             percent = float(width_info.rstrip('%'))
-                            width_pt = table_width_pt * (percent / 100.0)
+                            # Use a standard HTML table width as reference (e.g., 800px)
+                            width_value = 800 * (percent / 100.0)
                         else:
-                            # Absolute width (px, pt, etc.)
+                            # Convert to pixels for uniform comparison
                             width_pt = UnitConverter.to_pt(width_info)
+                            width_value = width_pt / 0.75  # Convert pt back to px
                     elif isinstance(width_info, (int, float)):
                         # Numeric width, assume pixels
-                        width_pt = width_info * 0.75  # px to pt
+                        width_value = float(width_info)
 
-                    if width_pt:
-                        widths_pt.append(width_pt)
-                        fixed_total += width_pt
+                    if width_value and width_value > 0:
+                        html_widths.append(width_value)
+                        total_html_width += width_value
+                        has_widths = True
                     else:
-                        widths_pt.append(None)
-                        auto_count += 1
+                        html_widths.append(None)
                 else:
-                    widths_pt.append(None)
-                    auto_count += 1
+                    html_widths.append(None)
 
-            # Calculate auto-width columns (distribute remaining width equally)
-            auto_width_pt = None
-            if auto_count > 0:
-                remaining = table_width_pt - fixed_total
-                auto_width_pt = max(remaining / auto_count, 50)  # Min 50pt per column
-                logger.debug(f"Auto-width columns: {auto_count}, each gets {auto_width_pt:.1f}pt (remaining: {remaining:.1f}pt from total: {table_width_pt}pt)")
+            # If no valid widths found, return
+            if not has_widths or total_html_width == 0:
+                logger.debug("No valid column widths found in HTML table")
+                return
 
-            # Second pass: apply widths
-            for col_idx, width_pt in enumerate(widths_pt):
+            # Second pass: calculate proportional widths for Word
+            word_widths = []
+            assigned_width = 0.0
+
+            for col_idx, html_width in enumerate(html_widths):
                 if col_idx >= len(table.columns):
                     break
 
-                final_width = width_pt if width_pt is not None else auto_width_pt
-                if final_width:
-                    table.columns[col_idx].width = Inches(final_width / 72)
-                    logger.debug(f"Set column {col_idx} width to {final_width:.1f}pt ({'fixed' if width_pt else 'auto'})")
+                if html_width is not None and html_width > 0:
+                    # Calculate proportional width
+                    proportion = html_width / total_html_width
+                    word_width_pt = table_width_pt * proportion
+
+                    # Ensure minimum column width (at least 30pt)
+                    word_width_pt = max(word_width_pt, 30)
+
+                    word_widths.append(word_width_pt)
+                    assigned_width += word_width_pt
+                else:
+                    # For columns without width, we'll distribute remaining space
+                    word_widths.append(None)
+
+            # If total assigned width exceeds table width, scale down proportionally
+            if assigned_width > table_width_pt:
+                scale_factor = table_width_pt / assigned_width
+                for i in range(len(word_widths)):
+                    if word_widths[i] is not None:
+                        word_widths[i] *= scale_factor
+                assigned_width = table_width_pt
+                logger.debug(f"Scaled down column widths by factor {scale_factor:.2f} to fit table width")
+
+            # Distribute remaining width to auto columns
+            auto_columns = sum(1 for w in word_widths if w is None)
+            if auto_columns > 0:
+                remaining_width = table_width_pt - assigned_width
+                auto_width = max(remaining_width / auto_columns, 30)  # Min 30pt per column
+                for i in range(len(word_widths)):
+                    if word_widths[i] is None:
+                        word_widths[i] = auto_width
+                logger.debug(f"Distributed {remaining_width:.1f}pt to {auto_columns} auto columns")
+
+            # Third pass: apply calculated widths to Word table
+            for col_idx, width_pt in enumerate(word_widths):
+                if col_idx >= len(table.columns):
+                    break
+
+                if width_pt:
+                    # Convert pt to inches and apply
+                    width_inches = width_pt / 72
+                    table.columns[col_idx].width = Inches(width_inches)
+
+                    # Calculate percentage for logging
+                    percent = (width_pt / table_width_pt) * 100
+                    logger.debug(f"Column {col_idx}: {width_pt:.1f}pt ({percent:.1f}% of table width)")
+
+            logger.info(f"Applied proportional column widths to table: total width {table_width_pt:.1f}pt ({table_width_pt/72:.2f} inches)")
 
         except Exception as e:
             logger.warning(f"Error applying column widths: {e}")
@@ -911,6 +969,9 @@ class TableBuilder:
     def _extract_column_widths(self, table_node: DOMNode) -> List[Optional[str]]:
         """
         Extract column widths from <col> tags or first row cells.
+
+        Prioritizes <col> tags within <colgroup> as they provide the most
+        accurate width information, especially for Element UI tables.
 
         Args:
             table_node: Table DOM node
@@ -925,14 +986,34 @@ class TableBuilder:
             if child.tag == 'colgroup':
                 for col in child.children:
                     if col.tag == 'col':
-                        width = col.get_attribute('width') or col.computed_styles.get('width')
+                        # Try multiple sources for width
+                        width = (
+                            col.get_attribute('width') or
+                            col.computed_styles.get('width') or
+                            None
+                        )
+
+                        # Convert numeric width attribute to string with 'px'
+                        if width and isinstance(width, (int, float)):
+                            width = f"{width}px"
+
                         widths.append(width)
             elif child.tag == 'col':
-                width = child.get_attribute('width') or child.computed_styles.get('width')
+                width = (
+                    child.get_attribute('width') or
+                    child.computed_styles.get('width') or
+                    None
+                )
+
+                # Convert numeric width attribute to string with 'px'
+                if width and isinstance(width, (int, float)):
+                    width = f"{width}px"
+
                 widths.append(width)
 
-        # If we found column definitions, return them
+        # If we found column definitions, log them and return
         if widths:
+            logger.debug(f"Found {len(widths)} column definitions from <col> tags: {widths}")
             return widths
 
         # Otherwise, extract from first row cells
@@ -947,10 +1028,14 @@ class TableBuilder:
                 # Don't use computed_styles.get('width') as it may contain browser defaults
                 width_attr = cell.get_attribute('width')
 
+                # Convert numeric width attribute to string with 'px'
+                if width_attr and isinstance(width_attr, (int, float)):
+                    width_attr = f"{width_attr}px"
+
                 # Check inline style for width
                 style_attr = cell.get_attribute('style')
                 width_from_style = None
-                if style_attr and 'width' in style_attr:
+                if style_attr and isinstance(style_attr, str) and 'width' in style_attr:
                     # Parse inline style to extract width
                     import re
                     match = re.search(r'width\s*:\s*([^;]+)', style_attr)
@@ -959,6 +1044,9 @@ class TableBuilder:
 
                 width = width_attr or width_from_style
                 widths.append(width)
+
+        if widths:
+            logger.debug(f"Extracted {len(widths)} column widths from first row cells: {widths}")
 
         return widths
 
