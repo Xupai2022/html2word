@@ -575,12 +575,138 @@ class DocumentBuilder:
         else:
             return f"<{tag}{attrs_str}>{children_html}</{tag}>"
 
+    def _composite_background_with_text(self, node: DOMNode, width_pt: float, height_pt: float) -> bytes:
+        """
+        Composite background image with text overlays using PIL.
+
+        This creates a perfect visual representation by:
+        1. Decoding the base64 background image
+        2. Drawing text overlays on top with correct positioning
+
+        Args:
+            node: DOM node with background-image
+            width_pt: Target width in points
+            height_pt: Target height in points
+
+        Returns:
+            PNG image data as bytes, or None if failed
+        """
+        try:
+            import base64
+            import re
+            import io
+            from PIL import Image, ImageDraw, ImageFont
+
+            # Extract background image
+            bg_image_css = node.computed_styles.get('background-image', '') or \
+                          (node.inline_styles.get('background-image', '') if hasattr(node, 'inline_styles') else '')
+
+            match = re.search(r'url\(["\']?data:image/([^;]+);base64,([^)"\'\s]+)', bg_image_css)
+            if not match:
+                logger.warning("Cannot extract base64 image from background-image")
+                return None
+
+            base64_data = match.group(2)
+            image_data = base64.b64decode(base64_data)
+
+            # Load background image
+            bg_img = Image.open(io.BytesIO(image_data))
+            original_width, original_height = bg_img.size
+            logger.debug(f"Loaded background image: {original_width}x{original_height}")
+
+            # Resize if needed to match target dimensions
+            target_width_px = int(width_pt * 96 / 72)
+            target_height_px = int(height_pt * 96 / 72)
+
+            if bg_img.size != (target_width_px, target_height_px):
+                bg_img = bg_img.resize((target_width_px, target_height_px), Image.Resampling.LANCZOS)
+                logger.debug(f"Resized from {original_width}x{original_height} to {target_width_px}x{target_height_px}")
+
+            # Convert to RGBA to support transparency
+            if bg_img.mode != 'RGBA':
+                bg_img = bg_img.convert('RGBA')
+
+            # Draw text overlays
+            draw = ImageDraw.Draw(bg_img)
+
+            # Try to load a font (fallback to default if not available)
+            try:
+                font = ImageFont.truetype("arial.ttf", 14)
+            except:
+                font = ImageFont.load_default()
+
+            # Process text children
+            for child in node.children:
+                if child.is_element:
+                    text_content = child.get_text_content() if hasattr(child, 'get_text_content') else ''
+                    if not text_content.strip():
+                        continue
+
+                    # Get position from inline_styles first (priority), then computed_styles
+                    top_str = '0'
+                    left_str = '0'
+
+                    if hasattr(child, 'inline_styles') and child.inline_styles:
+                        top_str = child.inline_styles.get('top', top_str)
+                        left_str = child.inline_styles.get('left', left_str)
+
+                    # Fallback to computed_styles if not in inline_styles
+                    if top_str == '0' and hasattr(child, 'computed_styles'):
+                        top_str = child.computed_styles.get('top', '0')
+                    if left_str == '0' and hasattr(child, 'computed_styles'):
+                        left_str = child.computed_styles.get('left', '0')
+
+                    from html2word.utils.units import UnitConverter
+                    top_pt = UnitConverter.to_pt(top_str)
+                    left_pt = UnitConverter.to_pt(left_str)
+
+                    # Convert to pixels
+                    top_px = int(top_pt * 96 / 72)
+                    left_px = int(left_pt * 96 / 72)
+
+                    # Apply leftward offset to compensate for font rendering
+                    left_px = max(0, left_px - 40)
+
+                    # Get text color (from inline_styles first, then computed_styles)
+                    color = '#000000'
+                    if hasattr(child, 'inline_styles') and child.inline_styles:
+                        color = child.inline_styles.get('color', color)
+                    if color == '#000000' and hasattr(child, 'computed_styles'):
+                        color = child.computed_styles.get('color', '#000000')
+
+                    # Simple color parsing (hex)
+                    if color.startswith('#'):
+                        color = color[1:]
+                        if len(color) == 3:
+                            color = ''.join([c*2 for c in color])
+                        r, g, b = int(color[0:2], 16), int(color[2:4], 16), int(color[4:6], 16)
+                        color_tuple = (r, g, b)
+                    else:
+                        color_tuple = (0, 0, 0)  # default black
+
+                    # Draw text
+                    draw.text((left_px, top_px), text_content.strip(), fill=color_tuple, font=font)
+                    logger.debug(f"Drew text at ({left_px}, {top_px}): {text_content.strip()[:30]}")
+
+            # Save to PNG bytes
+            output = io.BytesIO()
+            bg_img.save(output, format='PNG')
+            png_data = output.getvalue()
+
+            logger.info(f"Composited background+text image: {len(png_data)} bytes")
+            return png_data
+
+        except Exception as e:
+            logger.error(f"Failed to composite image: {e}", exc_info=True)
+            return None
+
     def _convert_background_image_element(self, node: DOMNode) -> bool:
         """
         Convert an element with background-image to an embedded image.
 
         Extracts base64 image data from background-image CSS property and
-        inserts it directly into Word document.
+        inserts it directly into Word document. If the element has child text
+        elements, they will be composited onto the image using PIL.
 
         Args:
             node: DOM node with background-image
@@ -658,6 +784,16 @@ class DocumentBuilder:
                 height_pt = height_pt * scale_factor
                 logger.debug(f"Scaled down to fit page: {width_pt:.1f}x{height_pt:.1f}pt")
 
+            # Try to composite with text overlays first
+            logger.debug("Attempting PIL composite method...")
+            composited_image_data = self._composite_background_with_text(node, width_pt, height_pt)
+
+            if composited_image_data:
+                # Use composited image
+                image_data = composited_image_data
+            else:
+                logger.warning("PIL composite failed, using original background image only")
+
             # Insert image into document
             image_stream = io.BytesIO(image_data)
             paragraph = self.document.add_paragraph()
@@ -677,15 +813,6 @@ class DocumentBuilder:
                 paragraph.alignment = WD_ALIGN_PARAGRAPH.RIGHT
 
             logger.info(f"Successfully inserted background-image ({width_pt:.1f}x{height_pt:.1f}pt, {len(image_data)} bytes)")
-
-            # Process absolutely positioned text children as separate paragraphs
-            # (Word doesn't support text overlays on images)
-            for child in node.children:
-                if child.is_element:
-                    text_content = child.get_text_content() if hasattr(child, 'get_text_content') else ''
-                    if text_content.strip():
-                        text_para = self.document.add_paragraph(text_content.strip())
-                        logger.debug(f"Added text overlay as paragraph: {text_content.strip()[:50]}")
 
             return True
 

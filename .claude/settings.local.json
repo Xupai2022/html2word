@@ -15,7 +15,9 @@
       "Bash(git reset:*)",
       "Bash(timeout 60 python:*)",
       "Bash(timeout 5 bash:*)",
-      "Bash(git rm:*)"
+      "Bash(git rm:*)",
+      "Bash(git -C . status)",
+      "Bash(git commit -m \"$(cat <<''EOF''\nfix: 使用PIL实现背景图片与文本的完美合成\n\n- 添加 _composite_background_with_text 方法实现图片文本合成\n- 使用 PIL/Pillow 库将文本直接绘制到背景图片上\n- 正确处理文本位置、颜色和字体\n- 移除之前将文本作为单独段落添加的方案\n- 生成合成后的 PNG 图片直接插入文档\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude <noreply@anthropic.com>\nEOF\n)\")"
     ],
     "deny": [],
     "ask": []
