@@ -34,6 +34,7 @@ class DocumentBuilder:
         self.table_builder = TableBuilder(self.document)
         self.image_builder = ImageBuilder(self.document, base_path)
         self.in_table_cell = False  # Track if we're processing content inside a table cell
+        self.processed_nodes = set()  # Track nodes that have been processed (for el-table merging)
 
     def build(self, tree: DOMTree) -> Document:
         """
@@ -127,9 +128,21 @@ class DocumentBuilder:
 
         # Divs - intelligent handling based on layout and styles
         elif tag == 'div':
+            # CRITICAL: Skip Element UI table wrapper divs - process children directly
+            # These are structural divs that should not be converted to tables
+            div_classes = node.attributes.get('class', '')
+            if isinstance(div_classes, list):
+                div_classes = ' '.join(div_classes)
+
+            if any(cls in div_classes for cls in ['el-table__header-wrapper', 'el-table__body-wrapper',
+                                                     'el-table__fixed-wrapper', 'el-table__fixed-header-wrapper',
+                                                     'el-table__fixed-body-wrapper', 'el-table__append-wrapper',
+                                                     'el-table__empty-wrapper']):
+                logger.debug(f"Skipping Element UI wrapper div: {div_classes}, processing children directly")
+                self._process_children(node)
             # IMPORTANT: Check background-image FIRST, before SVG check
             # If div has background-image, it should be converted as a whole (including any SVG children)
-            if self._has_background_image(node):
+            elif self._has_background_image(node):
                 logger.debug(f"Div has background-image, converting to screenshot")
                 success = self._convert_background_image_element(node)
                 if not success:
@@ -173,6 +186,38 @@ class DocumentBuilder:
 
         # Tables
         elif tag == 'table':
+            # Check if this table was already processed (as part of el-table merging)
+            if id(node) in self.processed_nodes:
+                logger.debug(f"Skipping table (already processed as part of el-table merge)")
+                return
+
+            # Debug: Log table class (use attributes.get for consistency)
+            table_classes = node.attributes.get('class', '')
+            if isinstance(table_classes, list):
+                table_classes_str = ' '.join(table_classes)
+            else:
+                table_classes_str = table_classes
+            logger.debug(f"Processing table with classes: {table_classes_str}")
+
+            # Check for Element UI el-table pattern (header and body split into separate tables)
+            is_header = self._is_el_table_header(node)
+            logger.debug(f"Is el-table__header: {is_header}")
+
+            if is_header:
+                # Try to find and merge with el-table__body
+                body_table = self._find_el_table_body(node)
+                logger.debug(f"Found el-table__body: {body_table is not None}")
+
+                if body_table:
+                    logger.info("Detected Element UI el-table pattern, merging header and body tables")
+                    self._build_merged_el_table(node, body_table)
+                    # Mark body table as processed to avoid duplicate processing
+                    self.processed_nodes.add(id(body_table))
+                    return
+                else:
+                    logger.warning("Found el-table__header but no corresponding el-table__body")
+
+            # Normal table processing
             self.table_builder.build_table(node)
 
         # Images
@@ -1391,6 +1436,150 @@ class DocumentBuilder:
             logger.error(f"Failed to process SVG element: {e}", exc_info=True)
             # Fallback: skip the SVG element
             pass
+
+    def _is_el_table_header(self, node: DOMNode) -> bool:
+        """
+        Check if a table node is an Element UI table header.
+
+        Element UI tables split the header and body into separate <table> elements:
+        - <table class="el-table__header"> contains only <thead>
+        - <table class="el-table__body"> contains only <tbody>
+
+        Args:
+            node: Table DOM node
+
+        Returns:
+            True if this is an el-table__header
+        """
+        if node.tag != 'table':
+            return False
+
+        # Use attributes.get() for consistency with rest of codebase
+        classes = node.attributes.get('class', '')
+
+        # Handle both list and string class attributes
+        if isinstance(classes, list):
+            return 'el-table__header' in classes
+        elif isinstance(classes, str):
+            # Check if 'el-table__header' is a complete class name (not substring)
+            return 'el-table__header' in classes.split()
+        return False
+
+    def _find_el_table_body(self, header_node: DOMNode) -> Optional[DOMNode]:
+        """
+        Find the corresponding el-table__body for an el-table__header.
+
+        Element UI often wraps el-table__header and el-table__body in separate divs.
+        This method searches the parent's siblings (i.e., at the grandparent level)
+        to find the el-table__body table.
+
+        Args:
+            header_node: The el-table__header node
+
+        Returns:
+            The el-table__body node if found, None otherwise
+        """
+        if not header_node.parent:
+            logger.debug("Header node has no parent, cannot find body")
+            return None
+
+        # Get the parent node (typically div.el-table__header-wrapper)
+        parent = header_node.parent
+
+        # Check parent's class to verify it's a header wrapper
+        parent_classes = parent.attributes.get('class', '')
+        if isinstance(parent_classes, list):
+            parent_classes = ' '.join(parent_classes)
+        logger.debug(f"Header parent classes: {parent_classes}")
+
+        if not parent.parent:
+            logger.debug("Header parent has no grandparent, cannot find body")
+            return None
+
+        # Get the grandparent node
+        grandparent = parent.parent
+
+        # Find the index of parent in grandparent's children
+        try:
+            parent_idx = grandparent.children.index(parent)
+        except ValueError:
+            logger.debug("Could not find parent index in grandparent")
+            return None
+
+        # Helper function to check if a node has el-table__body class
+        def has_body_class(node):
+            if node.tag != 'table':
+                return False
+            classes = node.attributes.get('class', '')
+            if isinstance(classes, list):
+                return 'el-table__body' in classes
+            elif isinstance(classes, str):
+                # Check if 'el-table__body' is a complete class name (not substring)
+                return 'el-table__body' in classes.split()
+            return False
+
+        # Search for el-table__body in subsequent siblings of parent
+        logger.debug(f"Searching for el-table__body in {len(grandparent.children) - parent_idx - 1} siblings")
+        for i in range(parent_idx + 1, len(grandparent.children)):
+            sibling = grandparent.children[i]
+
+            # Check if sibling itself is el-table__body
+            if has_body_class(sibling):
+                logger.info(f"Found el-table__body as direct sibling")
+                return sibling
+
+            # Check if sibling contains el-table__body (e.g., wrapped in div)
+            if sibling.is_element:
+                # Log sibling info
+                sibling_classes = sibling.attributes.get('class', '')
+                if isinstance(sibling_classes, list):
+                    sibling_classes = ' '.join(sibling_classes)
+                logger.debug(f"Checking sibling {sibling.tag} with classes: {sibling_classes}")
+
+                for child in sibling.children:
+                    if has_body_class(child):
+                        logger.info(f"Found el-table__body wrapped in sibling {sibling.tag}")
+                        return child
+
+        logger.warning("Could not find el-table__body after searching all siblings")
+        return None
+
+    def _build_merged_el_table(self, header_node: DOMNode, body_node: DOMNode):
+        """
+        Build a Word table by merging el-table__header and el-table__body.
+
+        Creates a single Word table with rows from both header and body tables.
+
+        Args:
+            header_node: The el-table__header node (contains <thead>)
+            body_node: The el-table__body node (contains <tbody>)
+        """
+        # Extract rows from both tables
+        header_rows = self.table_builder._extract_rows(header_node)
+        body_rows = self.table_builder._extract_rows(body_node)
+
+        if not header_rows and not body_rows:
+            logger.warning("No rows found in merged el-table")
+            return
+
+        # Merge rows
+        all_rows = header_rows + body_rows
+        num_rows = len(all_rows)
+        num_cols = self.table_builder._calculate_columns(all_rows)
+
+        if num_rows == 0 or num_cols == 0:
+            return
+
+        logger.debug(f"Building merged el-table: {num_rows} rows × {num_cols} columns")
+
+        # Create Word table
+        table = self.document.add_table(rows=num_rows, cols=num_cols)
+
+        # Fill table with merged rows
+        self.table_builder._fill_table(table, all_rows)
+
+        # Apply table-level styles (prefer header_node styles, as it usually has the main table styling)
+        self.table_builder._apply_table_style(table, header_node)
 
     def save(self, output_path: str):
         """

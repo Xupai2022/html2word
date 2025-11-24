@@ -91,14 +91,23 @@ class TableBuilder:
 
     def _calculate_columns(self, rows: List[DOMNode]) -> int:
         """
-        Calculate number of columns in table.
+        Calculate number of columns in table, excluding Element UI gutter columns.
+
+        Element UI tables often have a "gutter" column (for scrollbar space) which should be ignored.
+        This is typically:
+        - The last column
+        - Has empty content
+        - Has class containing "gutter" or col name containing "gutter"
 
         Args:
             rows: List of row nodes
 
         Returns:
-            Number of columns
+            Number of columns (excluding gutter)
         """
+        if not rows:
+            return 0
+
         max_cols = 0
 
         for row in rows:
@@ -109,7 +118,75 @@ class TableBuilder:
                     col_count += colspan
             max_cols = max(max_cols, col_count)
 
+        # Check if the last column in ALL rows is a gutter column
+        # If so, exclude it from the column count
+        if max_cols > 0 and self._has_gutter_column(rows, max_cols):
+            logger.debug(f"Detected gutter column, reducing column count from {max_cols} to {max_cols - 1}")
+            return max_cols - 1
+
         return max_cols
+
+    def _has_gutter_column(self, rows: List[DOMNode], max_cols: int) -> bool:
+        """
+        Check if there is an Element UI gutter column.
+
+        A gutter column is identified by:
+        1. Any cell has class="gutter" (most reliable, check this FIRST)
+        2. Element UI pattern: some rows have N+1 cells, others have N cells
+        3. The extra cell is empty
+
+        Args:
+            rows: List of row nodes
+            max_cols: Maximum number of cells in any row
+
+        Returns:
+            True if gutter column detected
+        """
+        if max_cols <= 1:
+            return False
+
+        # PRIORITY 1: Check if ANY cell has class="gutter"
+        # This is the most reliable indicator and works even with single-row tables
+        for row in rows:
+            cells = [c for c in row.children if c.tag in ('td', 'th')]
+            for cell in cells:
+                cell_classes = cell.attributes.get('class', '')
+                if isinstance(cell_classes, list):
+                    cell_classes = ' '.join(cell_classes)
+                elif not isinstance(cell_classes, str):
+                    cell_classes = ''
+
+                if 'gutter' in cell_classes.lower():
+                    logger.debug(f"Detected gutter column via class='gutter'")
+                    return True
+
+        # PRIORITY 2: Check Element UI pattern (some rows have more cells than others)
+        row_cell_counts = []
+        for row in rows:
+            cells = [c for c in row.children if c.tag in ('td', 'th')]
+            row_cell_counts.append(len(cells))
+
+        if not row_cell_counts:
+            return False
+
+        min_count = min(row_cell_counts)
+        max_count = max(row_cell_counts)
+
+        if max_count == min_count + 1:
+            # Some rows have one extra column
+            # Check if rows with max_count have empty last cell
+            for row in rows:
+                cells = [c for c in row.children if c.tag in ('td', 'th')]
+                if len(cells) == max_count:
+                    last_cell = cells[-1]
+
+                    # Check if cell has empty content
+                    text_content = last_cell.get_text_content() if hasattr(last_cell, 'get_text_content') else ''
+                    if not text_content.strip():
+                        logger.debug(f"Detected gutter column via empty last cell in longer row")
+                        return True
+
+        return False
 
     def _fill_table(self, table, rows: List[DOMNode]):
         """
@@ -122,6 +199,36 @@ class TableBuilder:
         # Build cell matrix to track merged cells
         matrix = self._build_cell_matrix(rows)
 
+        # Detect gutter column (for Element UI tables)
+        # Identify which rows have gutter column
+        rows_with_gutter = set()
+        max_html_cols = 0
+        min_html_cols = float('inf')
+
+        for idx, row in enumerate(rows):
+            col_count = sum(1 for c in row.children if c.tag in ('td', 'th'))
+            max_html_cols = max(max_html_cols, col_count)
+            min_html_cols = min(min_html_cols, col_count)
+
+        # Element UI pattern: some rows have more cells than others
+        # Rows with extra cells have gutter
+        if max_html_cols > min_html_cols:
+            for idx, row in enumerate(rows):
+                cells = [c for c in row.children if c.tag in ('td', 'th')]
+                if len(cells) == max_html_cols:
+                    # This row has extra cells, check if last is gutter
+                    last_cell = cells[-1]
+                    cell_classes = last_cell.attributes.get('class', '')
+                    if isinstance(cell_classes, list):
+                        cell_classes = ' '.join(cell_classes)
+
+                    text_content = last_cell.get_text_content() if hasattr(last_cell, 'get_text_content') else ''
+
+                    # If last cell is empty or has "gutter" class, mark this row
+                    if 'gutter' in cell_classes.lower() or not text_content.strip():
+                        rows_with_gutter.add(idx)
+                        logger.debug(f"Row {idx} has gutter column")
+
         # Fill cells
         for row_idx, row_node in enumerate(rows):
             word_row = table.rows[row_idx]
@@ -131,8 +238,16 @@ class TableBuilder:
 
             col_idx = 0
 
-            for cell_node in row_node.children:
+            # Get cells for this row
+            cells_in_row = [c for c in row_node.children if c.tag in ('td', 'th')]
+
+            for cell_idx, cell_node in enumerate(cells_in_row):
                 if cell_node.tag not in ('td', 'th'):
+                    continue
+
+                # Skip gutter column ONLY if this row has gutter and it's the last cell
+                if row_idx in rows_with_gutter and cell_idx == len(cells_in_row) - 1:
+                    logger.debug(f"Skipping gutter cell in row {row_idx}")
                     continue
 
                 # Skip cells that are occupied by a previous rowspan/colspan
@@ -214,11 +329,42 @@ class TableBuilder:
         num_cols = self._calculate_columns(rows)
         matrix = [[None for _ in range(num_cols)] for _ in range(num_rows)]
 
+        # Detect which rows have gutter columns
+        rows_with_gutter = set()
+        max_html_cols = 0
+        min_html_cols = float('inf')
+
+        for idx, row in enumerate(rows):
+            col_count = sum(1 for c in row.children if c.tag in ('td', 'th'))
+            max_html_cols = max(max_html_cols, col_count)
+            min_html_cols = min(min_html_cols, col_count)
+
+        if max_html_cols > min_html_cols:
+            for idx, row in enumerate(rows):
+                cells = [c for c in row.children if c.tag in ('td', 'th')]
+                if len(cells) == max_html_cols:
+                    last_cell = cells[-1]
+                    cell_classes = last_cell.attributes.get('class', '')
+                    if isinstance(cell_classes, list):
+                        cell_classes = ' '.join(cell_classes)
+
+                    text_content = last_cell.get_text_content() if hasattr(last_cell, 'get_text_content') else ''
+
+                    if 'gutter' in cell_classes.lower() or not text_content.strip():
+                        rows_with_gutter.add(idx)
+
         for row_idx, row_node in enumerate(rows):
             col_idx = 0
 
-            for cell_node in row_node.children:
+            # Get cells for this row
+            cells_in_row = [c for c in row_node.children if c.tag in ('td', 'th')]
+
+            for cell_idx, cell_node in enumerate(cells_in_row):
                 if cell_node.tag not in ('td', 'th'):
+                    continue
+
+                # Skip gutter column ONLY if this row has gutter and it's the last cell
+                if row_idx in rows_with_gutter and cell_idx == len(cells_in_row) - 1:
                     continue
 
                 # Find next available column
@@ -334,8 +480,17 @@ class TableBuilder:
         # If we apply box_model (which includes margins), it creates extra space_after
         # that causes table rows to be too tall
         # Solution: Pass None for box_model to disable margin-based spacing
+
+        # CRITICAL FIX: In table cells, do NOT apply cell background-color to paragraphs
+        # This creates the "sandwich" effect where paragraph background overlays cell background
+        # Cell background is already applied via apply_table_cell_style
+        # Solution: Remove background-color from paragraph styles
+        para_styles = cell_styles.copy()
+        if 'background-color' in para_styles:
+            del para_styles['background-color']
+
         box_model = cell_node.layout_info.get('box_model')
-        self.style_mapper.apply_paragraph_style(paragraph, cell_styles, box_model=None)
+        self.style_mapper.apply_paragraph_style(paragraph, para_styles, box_model=None)
 
         # Check if we've added any content
         has_content = False
@@ -356,8 +511,8 @@ class TableBuilder:
                 if child.tag == 'br':
                     # Line break - add new paragraph
                     paragraph = word_cell.add_paragraph()
-                    # Apply paragraph-level styles (NO box_model in table cells)
-                    self.style_mapper.apply_paragraph_style(paragraph, cell_styles, box_model=None)
+                    # Apply paragraph-level styles (NO box_model in table cells, NO background-color)
+                    self.style_mapper.apply_paragraph_style(paragraph, para_styles, box_model=None)
                     has_content = True
 
                 elif child.tag == 'img':
@@ -413,6 +568,11 @@ class TableBuilder:
         # Merge styles - node styles override base
         merged_styles = base_styles.copy()
         merged_styles.update(node.computed_styles)
+
+        # CRITICAL FIX: In table cells, do NOT apply cell background-color to paragraphs
+        # This creates the "sandwich" effect where paragraph background overlays cell background
+        if 'background-color' in merged_styles:
+            del merged_styles['background-color']
 
         # Apply paragraph-level styles
         # CRITICAL FIX: In table cells, do NOT apply box_model to avoid extra spacing
