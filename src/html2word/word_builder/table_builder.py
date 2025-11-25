@@ -553,7 +553,8 @@ class TableBuilder:
             del para_styles['background-color']
 
         box_model = cell_node.layout_info.get('box_model')
-        self.style_mapper.apply_paragraph_style(paragraph, para_styles, box_model=None)
+        # Table cells: limit line spacing to 1.2 for compact layout, auto-detect HTML line-height
+        self.style_mapper.apply_paragraph_style(paragraph, para_styles, box_model=None, max_line_spacing=1.2)
 
         # Check if we've added any content
         has_content = False
@@ -602,7 +603,10 @@ class TableBuilder:
                         # This ensures proper spacing between <p> tags in HTML
                         if child.tag == 'p':
                             # Add space before paragraph for separation (except for first paragraph)
-                            paragraph.paragraph_format.space_before = Pt(6)  # Small spacing between paragraphs
+                            # Calculate spacing based on font size (20% of font size, 2-3pt range)
+                            font_size_pt = self._get_font_size_pt(cell_styles.get('font-size', '14px'))
+                            spacing_pt = max(2.0, min(3.0, font_size_pt * 0.2))
+                            paragraph.paragraph_format.space_before = Pt(spacing_pt)
                     # Process block content and update paragraph reference
                     paragraph = self._add_cell_block_content(paragraph, child, cell_styles)
                     has_content = True
@@ -691,7 +695,8 @@ class TableBuilder:
 
         # Apply paragraph-level styles
         # CRITICAL FIX: In table cells, do NOT apply box_model to avoid extra spacing
-        self.style_mapper.apply_paragraph_style(paragraph, merged_styles, box_model=None)
+        # Table cells: limit line spacing to 1.2 for compact layout, auto-detect HTML line-height
+        self.style_mapper.apply_paragraph_style(paragraph, merged_styles, box_model=None, max_line_spacing=1.2)
 
         # Get the parent cell to add new paragraphs if needed
         word_cell = paragraph._parent
@@ -728,10 +733,14 @@ class TableBuilder:
                     para_styles = merged_styles.copy()
                     if 'background-color' in para_styles:
                         del para_styles['background-color']
-                    self.style_mapper.apply_paragraph_style(paragraph, para_styles, box_model=None)
+                    # Table cells: limit line spacing to 1.2 for compact layout, auto-detect HTML line-height
+                    self.style_mapper.apply_paragraph_style(paragraph, para_styles, box_model=None, max_line_spacing=1.2)
                     # Add spacing for nested <p> tags
                     if child.tag == 'p':
-                        paragraph.paragraph_format.space_before = Pt(6)
+                        # Calculate spacing based on font size (20% of font size, 2-3pt range)
+                        font_size_pt = self._get_font_size_pt(merged_styles.get('font-size', '14px'))
+                        spacing_pt = max(2.0, min(3.0, font_size_pt * 0.2))
+                        paragraph.paragraph_format.space_before = Pt(spacing_pt)
                     has_content_in_paragraph = False
 
                 # Recursively process the nested block element
@@ -1021,10 +1030,12 @@ class TableBuilder:
             table_width_pt = max_table_width_pt
 
         try:
-            # First pass: collect all HTML widths and calculate proportions
-            html_widths = []
-            total_html_width = 0.0
-            has_widths = False
+            # First pass: categorize columns and collect widths
+            html_widths = []  # HTML widths in px
+            is_percentage = []  # Track if width is percentage
+            has_absolute_widths = False
+            has_percentage_widths = False
+            total_absolute_width_px = 0.0
 
             for col_idx, width_info in enumerate(col_widths):
                 if col_idx >= len(table.columns):
@@ -1032,57 +1043,95 @@ class TableBuilder:
 
                 if width_info:
                     width_value = None
+                    is_pct = False
 
                     # Parse width (can be px, %, pt, or just a number)
                     if isinstance(width_info, str):
                         if '%' in width_info:
-                            # For percentage, convert to absolute value based on HTML table width
+                            # Percentage width
                             percent = float(width_info.rstrip('%'))
-                            # Use a standard HTML table width as reference (e.g., 800px)
-                            width_value = 800 * (percent / 100.0)
+                            width_value = percent  # Store as percentage
+                            is_pct = True
+                            has_percentage_widths = True
                         else:
-                            # Convert to pixels for uniform comparison
+                            # Absolute width (px, pt, etc.)
                             width_pt = UnitConverter.to_pt(width_info)
-                            width_value = width_pt / 0.75  # Convert pt back to px
+                            width_value = width_pt / 0.75  # Convert pt to px for calculation
+                            has_absolute_widths = True
+                            total_absolute_width_px += width_value
                     elif isinstance(width_info, (int, float)):
                         # Numeric width, assume pixels
                         width_value = float(width_info)
+                        has_absolute_widths = True
+                        total_absolute_width_px += width_value
 
-                    if width_value and width_value > 0:
-                        html_widths.append(width_value)
-                        total_html_width += width_value
-                        has_widths = True
-                    else:
-                        html_widths.append(None)
+                    html_widths.append(width_value)
+                    is_percentage.append(is_pct)
                 else:
                     html_widths.append(None)
+                    is_percentage.append(False)
 
             # If no valid widths found, return
-            if not has_widths or total_html_width == 0:
+            if not has_absolute_widths and not has_percentage_widths:
                 logger.debug("No valid column widths found in HTML table")
                 return
 
-            # Second pass: calculate proportional widths for Word
+            # Determine column width strategy
+            cols_with_no_width = sum(1 for w in html_widths if w is None)
+
+            # Second pass: calculate Word column widths
             word_widths = []
             assigned_width = 0.0
 
-            for col_idx, html_width in enumerate(html_widths):
-                if col_idx >= len(table.columns):
-                    break
+            if has_absolute_widths and not has_percentage_widths:
+                # Strategy 1: Mix of absolute and auto widths
+                # Absolute widths should use their actual size (converted to pt)
+                # Remaining space distributed to auto columns
 
-                if html_width is not None and html_width > 0:
-                    # Calculate proportional width
-                    proportion = html_width / total_html_width
-                    word_width_pt = table_width_pt * proportion
+                logger.debug(f"Using absolute width strategy: {total_absolute_width_px}px absolute, {cols_with_no_width} auto columns")
 
-                    # Ensure minimum column width (at least 30pt)
-                    word_width_pt = max(word_width_pt, 30)
+                # Convert total absolute width to pt
+                total_absolute_width_pt = total_absolute_width_px * 0.75
 
-                    word_widths.append(word_width_pt)
-                    assigned_width += word_width_pt
+                # Check if absolute widths exceed table width
+                if total_absolute_width_pt >= table_width_pt - (cols_with_no_width * 30):
+                    # Need to scale down - use proportional strategy instead
+                    logger.debug("Absolute widths too large, falling back to proportional strategy")
+                    total_html_width = total_absolute_width_px
+                    for col_idx, html_width in enumerate(html_widths):
+                        if html_width is not None:
+                            proportion = html_width / total_html_width
+                            word_width_pt = table_width_pt * proportion
+                            word_width_pt = max(word_width_pt, 30)
+                            word_widths.append(word_width_pt)
+                            assigned_width += word_width_pt
+                        else:
+                            word_widths.append(None)
                 else:
-                    # For columns without width, we'll distribute remaining space
-                    word_widths.append(None)
+                    # Use absolute widths directly
+                    for col_idx, html_width in enumerate(html_widths):
+                        if html_width is not None:
+                            # Convert px to pt
+                            word_width_pt = html_width * 0.75
+                            word_width_pt = max(word_width_pt, 30)
+                            word_widths.append(word_width_pt)
+                            assigned_width += word_width_pt
+                        else:
+                            word_widths.append(None)
+            else:
+                # Strategy 2: All percentages or mixed percentages
+                # Calculate proportional widths based on total
+                total_html_width = sum(w for w in html_widths if w is not None)
+
+                for col_idx, html_width in enumerate(html_widths):
+                    if html_width is not None:
+                        proportion = html_width / total_html_width
+                        word_width_pt = table_width_pt * proportion
+                        word_width_pt = max(word_width_pt, 30)
+                        word_widths.append(word_width_pt)
+                        assigned_width += word_width_pt
+                    else:
+                        word_widths.append(None)
 
             # If total assigned width exceeds table width, scale down proportionally
             if assigned_width > table_width_pt:
@@ -1103,7 +1152,7 @@ class TableBuilder:
                         word_widths[i] = auto_width
                 logger.debug(f"Distributed {remaining_width:.1f}pt to {auto_columns} auto columns")
 
-            # Third pass: apply calculated widths to Word table
+            # Third pass: apply calculated widths to Word table columns
             for col_idx, width_pt in enumerate(word_widths):
                 if col_idx >= len(table.columns):
                     break
@@ -1117,10 +1166,63 @@ class TableBuilder:
                     percent = (width_pt / table_width_pt) * 100
                     logger.debug(f"Column {col_idx}: {width_pt:.1f}pt ({percent:.1f}% of table width)")
 
+            # CRITICAL: Also set cell widths for each cell to ensure proper rendering
+            # Setting only table.columns[].width updates tblGrid but not individual cell tcW
+            # Word needs both for correct proportional column display
+            self._apply_cell_widths(table, word_widths)
+
             logger.info(f"Applied proportional column widths to table: total width {table_width_pt:.1f}pt ({table_width_pt/72:.2f} inches)")
 
         except Exception as e:
             logger.warning(f"Error applying column widths: {e}")
+
+    def _apply_cell_widths(self, table, col_widths_pt: List[float]):
+        """
+        Apply column widths to individual cells.
+
+        Word tables need both tblGrid (column definitions) AND tcW (cell widths) set
+        to properly display proportional columns. This method sets the tcW for each cell.
+
+        Args:
+            table: python-docx Table object
+            col_widths_pt: List of column widths in pt
+        """
+        from docx.oxml import parse_xml
+        from docx.oxml.ns import nsdecls, qn
+
+        try:
+            for row_idx, row in enumerate(table.rows):
+                col_idx = 0
+
+                for cell_idx, cell in enumerate(row.cells):
+                    if col_idx >= len(col_widths_pt):
+                        break
+
+                    width_pt = col_widths_pt[col_idx]
+                    if width_pt:
+                        # Convert pt to DXA (twentieths of a point)
+                        width_dxa = int(width_pt * 20)
+
+                        # Get or create cell properties
+                        tc = cell._element
+                        tcPr = tc.get_or_add_tcPr()
+
+                        # Remove existing width if present
+                        for tcW in tcPr.findall(qn('w:tcW')):
+                            tcPr.remove(tcW)
+
+                        # Set new cell width
+                        tcW = parse_xml(f'<w:tcW {nsdecls("w")} w:w="{width_dxa}" w:type="dxa"/>')
+                        tcPr.append(tcW)
+
+                        logger.debug(f"Set cell [row {row_idx}, col {cell_idx}] width to {width_pt:.1f}pt ({width_dxa} DXA)")
+
+                    col_idx += 1
+
+            logger.debug(f"Applied cell widths to {len(table.rows)} rows")
+
+        except Exception as e:
+            logger.warning(f"Error applying cell widths: {e}")
 
     def _extract_column_widths(self, table_node: DOMNode) -> List[Optional[str]]:
         """
@@ -1250,3 +1352,22 @@ class TableBuilder:
                     logger.debug(f"Applied row height: {height_pt}pt (atLeast)")
             except Exception as e:
                 logger.warning(f"Failed to apply row height: {e}")
+
+    def _get_font_size_pt(self, font_size) -> float:
+        """
+        Get font size in pt for spacing calculations.
+
+        Args:
+            font_size: Font size value (can be str like '14px' or numeric)
+
+        Returns:
+            Font size in pt (float)
+        """
+        if isinstance(font_size, (int, float)):
+            return float(font_size)
+
+        try:
+            from html2word.utils.units import UnitConverter
+            return UnitConverter.to_pt(str(font_size))
+        except:
+            return 10.5  # Default: 14px = 10.5pt (common for Chinese documents)

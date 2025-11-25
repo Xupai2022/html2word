@@ -82,7 +82,7 @@ class StyleMapper:
             # We can use highlighting, but it has limited colors
             pass
 
-    def apply_paragraph_style(self, paragraph, styles: Dict[str, Any], box_model=None, prev_margin_bottom: float = 0):
+    def apply_paragraph_style(self, paragraph, styles: Dict[str, Any], box_model=None, prev_margin_bottom: float = 0, max_line_spacing: float = None):
         """
         Apply paragraph styles with proper margin collapse.
 
@@ -91,6 +91,7 @@ class StyleMapper:
             styles: Computed CSS styles
             box_model: BoxModel object (optional)
             prev_margin_bottom: Previous element's margin-bottom in pt (for margin collapse)
+            max_line_spacing: Maximum line spacing multiplier (optional, for table cells use 1.2)
         """
         fmt = paragraph.paragraph_format
 
@@ -126,13 +127,19 @@ class StyleMapper:
                             font_size_pt = 12.0
 
                         multiplier = line_height_pt / font_size_pt
-                        multiplier = max(0.8, min(3.0, multiplier))
+                        # Use max_line_spacing if provided (e.g., 1.2 for table cells), otherwise default to 3.0
+                        upper_limit = max_line_spacing if max_line_spacing is not None else 3.0
+                        multiplier = max(0.8, min(upper_limit, multiplier))
                         fmt.line_spacing = multiplier
-                        logger.debug(f"Line-height (numeric pt): {line_height}pt ÷ font-size {font_size_pt:.1f}pt = {multiplier:.2f}x")
+                        logger.debug(f"Line-height (numeric pt): {line_height}pt ÷ font-size {font_size_pt:.1f}pt = {multiplier:.2f}x (max={upper_limit})")
                     else:
                         # True multiplier (e.g., 1.5, 2.0)
-                        fmt.line_spacing = float(line_height)
-                        logger.debug(f"Line-height (multiplier): {line_height}x")
+                        multiplier = float(line_height)
+                        # Apply max_line_spacing limit if provided (e.g., 1.2 for table cells)
+                        if max_line_spacing is not None:
+                            multiplier = min(multiplier, max_line_spacing)
+                        fmt.line_spacing = multiplier
+                        logger.debug(f"Line-height (multiplier): {line_height}x → {multiplier}x (max={max_line_spacing})")
                 else:
                     # Parse absolute value (e.g., "22px", "16pt")
                     line_height_pt = UnitConverter.to_pt(str(line_height))
@@ -148,11 +155,13 @@ class StyleMapper:
                         multiplier = line_height_pt / font_size_pt
 
                         # Clamp to reasonable range to avoid extreme values
-                        multiplier = max(0.8, min(3.0, multiplier))
+                        # Use max_line_spacing if provided (e.g., 1.2 for table cells), otherwise default to 3.0
+                        upper_limit = max_line_spacing if max_line_spacing is not None else 3.0
+                        multiplier = max(0.8, min(upper_limit, multiplier))
 
                         # Set as multiplier (not absolute Pt value)
                         fmt.line_spacing = multiplier
-                        logger.debug(f"Line-height (string): {line_height} → {line_height_pt:.1f}pt ÷ font-size {font_size_pt:.1f}pt = {multiplier:.2f}x")
+                        logger.debug(f"Line-height (string): {line_height} → {line_height_pt:.1f}pt ÷ font-size {font_size_pt:.1f}pt = {multiplier:.2f}x (max={upper_limit})")
             except Exception as e:
                 logger.debug(f"Error setting line-height: {e}")
                 pass
