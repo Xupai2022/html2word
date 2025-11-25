@@ -30,7 +30,7 @@ class DocumentBuilder:
         """
         self.base_path = base_path
         self.document = Document()
-        self.paragraph_builder = ParagraphBuilder(self.document)
+        self.paragraph_builder = ParagraphBuilder(self.document, document_builder=self)
         self.table_builder = TableBuilder(self.document)
         self.image_builder = ImageBuilder(self.document, base_path)
         self.in_table_cell = False  # Track if we're processing content inside a table cell

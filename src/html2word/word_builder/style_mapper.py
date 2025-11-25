@@ -82,7 +82,7 @@ class StyleMapper:
             # We can use highlighting, but it has limited colors
             pass
 
-    def apply_paragraph_style(self, paragraph, styles: Dict[str, Any], box_model=None, prev_margin_bottom: float = 0, max_line_spacing: float = None):
+    def apply_paragraph_style(self, paragraph, styles: Dict[str, Any], box_model=None, prev_margin_bottom: float = 0, max_line_spacing: float = None, in_table_cell: bool = False):
         """
         Apply paragraph styles with proper margin collapse.
 
@@ -92,6 +92,7 @@ class StyleMapper:
             box_model: BoxModel object (optional)
             prev_margin_bottom: Previous element's margin-bottom in pt (for margin collapse)
             max_line_spacing: Maximum line spacing multiplier (optional, for table cells use 1.2)
+            in_table_cell: Whether the paragraph is inside a table cell (to avoid redundant backgrounds)
         """
         fmt = paragraph.paragraph_format
 
@@ -210,20 +211,28 @@ class StyleMapper:
         if 'background-color' in styles:
             try:
                 bg_color = styles['background-color']
-                # Apply opacity if present
-                if 'opacity' in styles:
-                    bg_color = self._apply_opacity_to_color(bg_color, styles['opacity'])
 
-                rgb_color = ColorConverter.to_rgb_color(bg_color)
-                if rgb_color:
-                    from docx.oxml import parse_xml
-                    from docx.oxml.ns import nsdecls
+                # OPTIMIZATION: Skip transparent/white backgrounds in table cells
+                # When a paragraph is inside a table cell with its own background,
+                # applying a transparent or white background to the paragraph creates
+                # visual artifacts (white boxes inside colored backgrounds).
+                if in_table_cell and ColorConverter.is_transparent_or_near_white(bg_color):
+                    logger.debug(f"Skipping transparent/white paragraph background in table cell: {bg_color}")
+                else:
+                    # Apply opacity if present
+                    if 'opacity' in styles:
+                        bg_color = self._apply_opacity_to_color(bg_color, styles['opacity'])
 
-                    # Add shading element
-                    shd = parse_xml(
-                        f'<w:shd {nsdecls("w")} w:fill="{ColorConverter.to_hex(bg_color)[1:]}"/>'
-                    )
-                    paragraph._element.get_or_add_pPr().append(shd)
+                    rgb_color = ColorConverter.to_rgb_color(bg_color)
+                    if rgb_color:
+                        from docx.oxml import parse_xml
+                        from docx.oxml.ns import nsdecls
+
+                        # Add shading element
+                        shd = parse_xml(
+                            f'<w:shd {nsdecls("w")} w:fill="{ColorConverter.to_hex(bg_color)[1:]}"/>'
+                        )
+                        paragraph._element.get_or_add_pPr().append(shd)
             except Exception as e:
                 logger.warning(f"Error setting paragraph background: {e}")
 

@@ -18,14 +18,16 @@ logger = logging.getLogger(__name__)
 class ParagraphBuilder:
     """Builds Word paragraphs from HTML nodes."""
 
-    def __init__(self, document):
+    def __init__(self, document, document_builder=None):
         """
         Initialize paragraph builder.
 
         Args:
             document: python-docx Document object
+            document_builder: Reference to parent DocumentBuilder (optional, for context tracking)
         """
         self.document = document
+        self.document_builder = document_builder
         self.style_mapper = StyleMapper()
         # Track previous element's margin-bottom for true margin collapse
         self.last_margin_bottom = 0.0
@@ -48,11 +50,16 @@ class ParagraphBuilder:
 
         # Apply paragraph-level styles with margin collapse
         box_model = node.layout_info.get('box_model')
+
+        # Check if we're in a table cell (to avoid redundant white backgrounds)
+        in_table_cell = getattr(self.document_builder, 'in_table_cell', False) if self.document_builder else False
+
         self.style_mapper.apply_paragraph_style(
             paragraph,
             node.computed_styles,
             box_model,
-            prev_margin_bottom=self.last_margin_bottom  # Pass for margin collapse
+            prev_margin_bottom=self.last_margin_bottom,  # Pass for margin collapse
+            in_table_cell=in_table_cell  # Pass table cell context
         )
 
         # Update last_margin_bottom for next element

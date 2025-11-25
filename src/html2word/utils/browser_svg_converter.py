@@ -186,8 +186,20 @@ class BrowserSVGConverter:
 <head>
     <meta charset="utf-8">
     <style>
-        body {{ margin: 0; padding: 0; background: white; }}
-        svg {{ display: block; }}
+        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+        html, body {{
+            width: {width}px;
+            height: {height}px;
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background: white;
+        }}
+        svg {{
+            display: block;
+            width: {width}px !important;
+            height: {height}px !important;
+        }}
     </style>
 </head>
 <body>
@@ -210,6 +222,8 @@ class BrowserSVGConverter:
                     '--headless',
                     '--disable-gpu',
                     '--no-sandbox',
+                    '--hide-scrollbars',  # 隐藏滚动条
+                    '--force-device-scale-factor=1',  # 确保1:1像素比例
                     f'--window-size={width},{height}',
                     f'--screenshot={png_file}',
                     html_file

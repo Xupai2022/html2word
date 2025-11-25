@@ -143,13 +143,20 @@ class ImageBuilder:
 
             # Apply text alignment if specified (check both img and parent container)
             text_align = img_node.computed_styles.get('text-align')
-            if not text_align and img_node.parent:
+
+            # Check for margin: auto (CSS horizontal centering) on img or parent
+            is_margin_centered = self._check_margin_centering(img_node)
+
+            # If not already aligned by text-align or margin, check parent
+            if not text_align and not is_margin_centered and img_node.parent:
                 # Check parent's text-align
                 text_align = img_node.parent.computed_styles.get('text-align')
 
-            if text_align == 'center':
+            # Apply alignment based on detected styles
+            if is_margin_centered or text_align == 'center':
                 from docx.enum.text import WD_ALIGN_PARAGRAPH
                 paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                logger.debug(f"Image centered via {'margin:auto' if is_margin_centered else 'text-align:center'}")
             elif text_align == 'right':
                 from docx.enum.text import WD_ALIGN_PARAGRAPH
                 paragraph.alignment = WD_ALIGN_PARAGRAPH.RIGHT
@@ -168,6 +175,60 @@ class ImageBuilder:
         except Exception as e:
             logger.error(f"Error inserting image {src}: {e}")
             return None
+
+    def _check_margin_centering(self, img_node: DOMNode) -> bool:
+        """
+        Check if image or its parent has margin: auto centering.
+
+        Args:
+            img_node: Image DOM node
+
+        Returns:
+            True if centered via margin: auto
+        """
+        # Check img node itself
+        margin = img_node.computed_styles.get('margin', '')
+        margin_left = img_node.computed_styles.get('margin-left', '')
+        margin_right = img_node.computed_styles.get('margin-right', '')
+
+        # Check for margin shorthand with auto
+        if margin:
+            parts = str(margin).split()
+            # Pattern: "16px auto 12px" or "0 auto" etc
+            # In shorthand: margin: top right bottom left or margin: top horizontal bottom
+            if 'auto' in parts:
+                # If auto appears in margin shorthand, it's for horizontal centering
+                if len(parts) == 2 and parts[1] == 'auto':  # "16px auto"
+                    return True
+                elif len(parts) == 3 and parts[1] == 'auto':  # "16px auto 12px"
+                    return True
+                elif len(parts) == 4 and (parts[1] == 'auto' or parts[3] == 'auto'):  # "16px auto 12px auto"
+                    return True if parts[1] == 'auto' and parts[3] == 'auto' else False
+
+        # Check explicit margin-left/right
+        if (margin_left == 'auto' and margin_right == 'auto'):
+            return True
+
+        # Check parent node (often the container has margin: auto)
+        if img_node.parent:
+            parent_margin = img_node.parent.computed_styles.get('margin', '')
+            parent_margin_left = img_node.parent.computed_styles.get('margin-left', '')
+            parent_margin_right = img_node.parent.computed_styles.get('margin-right', '')
+
+            if parent_margin:
+                parts = str(parent_margin).split()
+                if 'auto' in parts:
+                    if len(parts) == 2 and parts[1] == 'auto':
+                        return True
+                    elif len(parts) == 3 and parts[1] == 'auto':
+                        return True
+                    elif len(parts) == 4 and parts[1] == 'auto' and parts[3] == 'auto':
+                        return True
+
+            if (parent_margin_left == 'auto' and parent_margin_right == 'auto'):
+                return True
+
+        return False
 
     def _get_best_image_src(self, img_node: DOMNode) -> Optional[str]:
         """

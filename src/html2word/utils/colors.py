@@ -192,3 +192,42 @@ class ColorConverter:
         # Formula: sqrt(0.299*R^2 + 0.587*G^2 + 0.114*B^2)
         brightness = (0.299 * rgb[0]**2 + 0.587 * rgb[1]**2 + 0.114 * rgb[2]**2) ** 0.5
         return brightness > 127.5
+
+    @classmethod
+    def is_transparent_or_near_white(cls, color_string: str, threshold: int = 250) -> bool:
+        """
+        Check if a color is transparent or very close to white.
+
+        This is useful for avoiding redundant background colors in nested elements.
+        For example, a white paragraph background inside a colored table cell is unnecessary.
+
+        Args:
+            color_string: CSS color value
+            threshold: RGB threshold for "near white" (default 250, max 255)
+
+        Returns:
+            True if the color is transparent, white, or very close to white
+
+        Examples:
+            is_transparent_or_near_white("transparent") -> True
+            is_transparent_or_near_white("#FFFFFF") -> True
+            is_transparent_or_near_white("#FEFEFE") -> True
+            is_transparent_or_near_white("#F0F0F0") -> False (below threshold)
+            is_transparent_or_near_white("#00FF00") -> False (green)
+        """
+        if not color_string:
+            return True
+
+        color_str = color_string.strip().lower()
+
+        # Explicit transparent keyword
+        if color_str == 'transparent' or color_str == 'none':
+            return True
+
+        # Parse the color
+        rgb = cls.parse_color(color_string)
+        if rgb is None:
+            return True  # Treat unparseable as transparent
+
+        # Check if all RGB components are above the threshold (near white)
+        return rgb[0] >= threshold and rgb[1] >= threshold and rgb[2] >= threshold
