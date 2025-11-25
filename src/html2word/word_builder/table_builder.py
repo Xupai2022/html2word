@@ -623,16 +623,43 @@ class TableBuilder:
                         has_content = True
 
                 else:
-                    # Other elements - extract text content
-                    text = child.get_text_content()
-                    text = self._normalize_whitespace(text)
-                    if text.strip():
-                        run = paragraph.add_run(text)
-                        # Merge styles
-                        element_styles = cell_styles.copy()
-                        element_styles.update(child.computed_styles)
-                        self.style_mapper.apply_run_style(run, element_styles)
-                        has_content = True
+                    # Other elements - process recursively to preserve nested styles
+                    # IMPORTANT: Don't just extract text, process children to preserve their styles
+                    self._process_cell_element_children(paragraph, child, cell_styles)
+                    has_content = True
+
+    def _process_cell_element_children(self, paragraph, element: DOMNode, base_styles: Dict[str, Any]):
+        """
+        Process children of an element in a table cell, preserving nested styles.
+
+        Args:
+            paragraph: Current Word paragraph
+            element: Element whose children to process
+            base_styles: Base styles from parent
+        """
+        # Merge element's styles with base styles
+        element_styles = base_styles.copy()
+        element_styles.update(element.computed_styles)
+
+        logger.debug(f"_process_cell_element_children: {element.tag}, base color: {base_styles.get('color')}, element color: {element.computed_styles.get('color')}, merged color: {element_styles.get('color')}")
+
+        for child in element.children:
+            if child.is_text:
+                text = child.text or ""
+                text = self._normalize_whitespace(text)
+                if text.strip():
+                    run = paragraph.add_run(text)
+                    self.style_mapper.apply_run_style(run, element_styles)
+
+            elif child.is_element:
+                if child.tag in ('strong', 'b', 'em', 'i', 'u', 'span', 'a'):
+                    # Inline elements - process with their own styles
+                    self._add_cell_inline_content(paragraph, child, element_styles)
+                elif child.tag == 'br':
+                    paragraph.add_run('\n')
+                else:
+                    # Recursively process other elements
+                    self._process_cell_element_children(paragraph, child, element_styles)
 
     def _should_skip_element(self, node: DOMNode) -> bool:
         """
@@ -744,7 +771,8 @@ class TableBuilder:
                     has_content_in_paragraph = False
 
                 # Recursively process the nested block element
-                paragraph = self._add_cell_block_content(paragraph, child, base_styles)
+                # IMPORTANT: Pass merged_styles instead of base_styles to preserve style inheritance
+                paragraph = self._add_cell_block_content(paragraph, child, merged_styles)
                 has_content_in_paragraph = True
 
             else:
@@ -767,9 +795,13 @@ class TableBuilder:
             node: Inline element node
             base_styles: Base styles from parent
         """
-        # Merge styles
+        # Merge styles - CRITICAL: node styles override base styles
         merged_styles = base_styles.copy()
         merged_styles.update(node.computed_styles)
+
+        # DEBUG: Log color merging for span elements
+        if node.tag == 'span' and 'color' in node.computed_styles:
+            logger.debug(f"Span color merging: base={base_styles.get('color')}, node={node.computed_styles.get('color')}, merged={merged_styles.get('color')}")
 
         for child in node.children:
             if child.is_text:

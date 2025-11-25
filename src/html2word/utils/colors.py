@@ -56,7 +56,7 @@ class ColorConverter:
 
     # Regex patterns
     HEX_PATTERN = re.compile(r'^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$')
-    RGB_PATTERN = re.compile(r'^rgba?\s*\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*(?:,\s*([\d.]+)\s*)?\)$')
+    RGB_PATTERN = re.compile(r'^rgba?\s*\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)\s*(?:,\s*([\d.]+)\s*)?\)$')
 
     @classmethod
     def parse_color(cls, color_string: str) -> Optional[Tuple[int, int, int]]:
@@ -136,7 +136,8 @@ class ColorConverter:
             return None
 
         r, g, b = match.groups()[:3]
-        return (int(r), int(g), int(b))
+        # Convert to int, handling both "255" and "255.0" formats
+        return (int(float(r)), int(float(g)), int(float(b)))
 
     @classmethod
     def to_rgb_color(cls, color_string: str) -> Optional[RGBColor]:
