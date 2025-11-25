@@ -90,6 +90,12 @@ class DocumentBuilder:
         # CRITICAL: Skip hidden/template elements (contains templates, not visible content)
         # This must be checked BEFORE any other processing
         if self._should_skip_hidden_element(node):
+            # Add more debug info for why element is being skipped
+            if node.tag == 'p':
+                logger.debug(f"Skipping paragraph with text: {node.get_text_content()[:50] if node.get_text_content() else 'empty'}")
+                if node.computed_styles:
+                    logger.debug(f"  Display: {node.computed_styles.get('display', 'not set')}")
+                    logger.debug(f"  Visibility: {node.computed_styles.get('visibility', 'not set')}")
             logger.debug(f"Skipping hidden/template element: {node.tag} with class='{node.attributes.get('class', '')}'")
             return
 
@@ -249,15 +255,21 @@ class DocumentBuilder:
 
         # Section elements - check for grid/flex layout or border/background styling
         elif tag == 'section':
+            # Log section processing for debugging
+            logger.debug(f"Processing section with classes: {node.attributes.get('class', [])}")
+
             # Check if section uses grid/flex layout (same logic as div)
             if self._should_convert_to_grid_table(node):
+                logger.debug(f"Converting section to grid table (classes={node.attributes.get('class', [])})")
                 self._convert_grid_to_table_smart(node)
             # Check if section has visual styling that requires table wrapper
             elif self._should_wrap_in_styled_table(node):
+                logger.debug(f"Wrapping section in styled table (classes={node.attributes.get('class', [])})")
                 self._wrap_div_in_styled_table(node)
             else:
                 # Plain container - process children directly
                 # Child sections with borders will be handled by their own processing
+                logger.debug(f"Processing section children directly (classes={node.attributes.get('class', [])})")
                 self._process_children(node)
 
         # Other container elements - process children directly
@@ -656,7 +668,21 @@ class DocumentBuilder:
             display = node.computed_styles.get('display', '')
             visibility = node.computed_styles.get('visibility', '')
 
-            if display == 'none' or visibility == 'hidden':
+            # Special handling: if element has actual text content, don't skip it
+            # even if display:none (might be wrongly applied CSS)
+            if display == 'none':
+                text_content = node.get_text_content()
+                if text_content and text_content.strip():
+                    # Has meaningful text content, check if this is a false positive
+                    # (e.g., p:empty rule incorrectly applied to non-empty paragraph)
+                    logger.debug(f"Element has display:none but contains text: {text_content[:50]}")
+                    # Don't skip if it's a paragraph with actual content
+                    if node.tag == 'p':
+                        logger.debug(f"Not skipping non-empty paragraph despite display:none")
+                        return False
+                return True
+
+            if visibility == 'hidden':
                 return True
 
         # Check for template tags (Vue, Angular, etc.)
@@ -1285,6 +1311,9 @@ class DocumentBuilder:
             # Process children within the cell
             original_doc = self.document
             for child in node.children:
+                # Log processing of each child for debugging
+                if child.tag:
+                    logger.debug(f"Processing child {child.tag} (classes={child.attributes.get('class', [])}) in table cell")
                 self._process_node_in_cell(child, cell, original_doc)
             self.document = original_doc
 
