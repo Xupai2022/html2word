@@ -105,7 +105,8 @@ class ImageBuilder:
 
         # Calculate display size in inches
         # Priority: width/height > max-width/max-height > defaults
-        max_width_inches = 6.0  # Default max width (for letter size page)
+        # Maximum usable width: 6.5 inches (468pt) for standard Word page with margins
+        max_width_inches = 6.5  # Adjusted to match actual page width
         max_height_inches = 9.0  # Default max height
 
         # Only use max-width/max-height if width/height are not specified
@@ -229,7 +230,7 @@ class ImageBuilder:
         # Fall back to src attribute
         return img_node.get_attribute('src')
 
-    def build_svg(self, svg_node: DOMNode, width: str, height: str) -> Optional[object]:
+    def build_svg(self, svg_node: DOMNode, width: str, height: str, in_table_cell: bool = False) -> Optional[object]:
         """
         Convert inline SVG to image and insert.
 
@@ -242,6 +243,7 @@ class ImageBuilder:
             svg_node: SVG DOM node
             width: SVG width (from attribute or CSS)
             height: SVG height (from attribute or CSS)
+            in_table_cell: Whether the SVG is being inserted in a table cell
 
         Returns:
             python-docx InlineShape object or None
@@ -261,17 +263,17 @@ class ImageBuilder:
             # Try method 1: BrowserSVGConverter (best for complex charts)
             png_data = self._convert_svg_with_browser(svg_content, width_val, height_val)
             if png_data:
-                return self._insert_svg_as_image(png_data, width_val, height_val, "Browser")
+                return self._insert_svg_as_image(png_data, width_val, height_val, "Browser", in_table_cell)
 
             # Try method 2: cairosvg (high quality)
             png_data = self._convert_svg_with_cairosvg(svg_content)
             if png_data:
-                return self._insert_svg_as_image(png_data, width_val, height_val, "cairosvg")
+                return self._insert_svg_as_image(png_data, width_val, height_val, "cairosvg", in_table_cell)
 
             # Try method 3: svglib + reportlab
             png_data = self._convert_svg_with_svglib(svg_content, width_val, height_val)
             if png_data:
-                return self._insert_svg_as_image(png_data, width_val, height_val, "svglib")
+                return self._insert_svg_as_image(png_data, width_val, height_val, "svglib", in_table_cell)
 
             # Fallback: cairosvg and svglib failed
             logger.warning("SVG conversion failed: Both cairosvg and svglib not available or failed")
@@ -381,21 +383,42 @@ class ImageBuilder:
             logger.warning(f"svglib conversion failed: {e}")
             return None
 
-    def _insert_svg_as_image(self, png_data: bytes, width_pt: float, height_pt: float, method: str) -> Optional[object]:
+    def _insert_svg_as_image(self, png_data: bytes, width_pt: float, height_pt: float, method: str, in_table_cell: bool = False) -> Optional[object]:
         """
-        Insert PNG data as image in document.
+        Insert PNG data as image in document with automatic scaling to fit page width.
 
         Args:
             png_data: PNG image data
             width_pt: Width in points
             height_pt: Height in points
             method: Conversion method used
+            in_table_cell: Whether the image is being inserted in a table cell
 
         Returns:
             python-docx InlineShape object or None
         """
         try:
             image_stream = io.BytesIO(png_data)
+
+            # Maximum usable width depends on context
+            # In table cells, we need to account for cell padding (typically 5-10pt on each side)
+            # Use a more conservative limit to ensure images don't get cut off
+            if in_table_cell:
+                # Reduce max width by 36pt (18pt padding on each side) to ensure image fits
+                max_width_pt = 432  # 468 - 36 = 432pt (6 inches)
+                logger.debug(f"Image in table cell, using reduced max width: {max_width_pt}pt")
+            else:
+                # Standard page width (6.5 inches = 468pt for standard page with margins)
+                max_width_pt = 468
+
+            # Scale down if image exceeds max width
+            if width_pt > max_width_pt:
+                scale_factor = max_width_pt / width_pt
+                original_width = width_pt
+                original_height = height_pt
+                width_pt = max_width_pt
+                height_pt = height_pt * scale_factor
+                logger.info(f"Scaling SVG from {original_width:.1f}x{original_height:.1f}pt to {width_pt:.1f}x{height_pt:.1f}pt to fit {'cell' if in_table_cell else 'page'} width")
 
             # Insert image
             paragraph = self.document.add_paragraph()

@@ -876,14 +876,24 @@ class DocumentBuilder:
 
                 logger.debug(f"Calculated dimensions from aspect ratio: {width_pt:.1f}x{height_pt:.1f}pt (ratio={aspect_ratio:.2f})")
 
-            # Limit to page width (A4: 595pt, with margins ~500pt usable)
-            max_width_pt = 500  # Maximum usable width in Word document
+            # Check if we're in a table cell context
+            in_cell = getattr(self, 'in_table_cell', False)
+
+            # Limit to page width or cell width
+            if in_cell:
+                # In table cells, use reduced width to account for cell padding
+                max_width_pt = 432  # 468 - 36 = 432pt (accounting for padding)
+                logger.debug("Background image in table cell, using reduced max width")
+            else:
+                # Standard page width (6.5 inches = 468pt for standard Word page with margins)
+                max_width_pt = 468
+
             if width_pt > max_width_pt:
-                # Scale down to fit page width while maintaining aspect ratio
+                # Scale down to fit width while maintaining aspect ratio
                 scale_factor = max_width_pt / width_pt
                 width_pt = max_width_pt
                 height_pt = height_pt * scale_factor
-                logger.debug(f"Scaled down to fit page: {width_pt:.1f}x{height_pt:.1f}pt")
+                logger.debug(f"Scaled down to fit {'cell' if in_cell else 'page'}: {width_pt:.1f}x{height_pt:.1f}pt")
 
             # Try to composite with text overlays first
             logger.debug("Attempting PIL composite method...")
@@ -1416,12 +1426,17 @@ class DocumentBuilder:
         try:
             # Get SVG dimensions from attributes or CSS
             width = svg_node.get_attribute('width') or svg_node.computed_styles.get('width', '100')
-            height = svg_node.get_attribute('height') or svg_node.computed_styles.get('width', '100')
+            height = svg_node.get_attribute('height') or svg_node.computed_styles.get('height', '100')
 
             logger.info(f"Processing SVG element: width={width}, height={height}")
 
+            # Check if we're in a table cell context
+            in_cell = getattr(self, 'in_table_cell', False)
+            if in_cell:
+                logger.debug("SVG is being inserted in a table cell, will use reduced max width")
+
             # Convert SVG to image using ImageBuilder's SVG support
-            result = self.image_builder.build_svg(svg_node, width, height)
+            result = self.image_builder.build_svg(svg_node, width, height, in_cell)
 
             if result:
                 logger.info(f"Successfully processed SVG element")

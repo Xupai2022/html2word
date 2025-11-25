@@ -318,6 +318,15 @@ class ImageProcessor:
             final_height = max_height
             final_width = max_height * aspect_ratio
 
+        # Final safety check: ensure width doesn't exceed 6.5 inches (468pt)
+        # This is the maximum usable width for standard Word page with margins
+        absolute_max_width = 6.5
+        if final_width > absolute_max_width:
+            scale = absolute_max_width / final_width
+            final_width = absolute_max_width
+            final_height = final_height * scale
+            logger.debug(f"Applied absolute max width limit: scaled to {final_width:.2f}x{final_height:.2f} inches")
+
         return final_width, final_height
 
     def _apply_css_filters(self, image: Image.Image, filter_css: str) -> Image.Image:
