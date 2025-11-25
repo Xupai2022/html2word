@@ -6,7 +6,7 @@ Builds Word tables from HTML table elements with proper cell merging.
 
 import logging
 from typing import List, Optional, Tuple, Dict, Any
-from docx.shared import Inches
+from docx.shared import Inches, Pt
 
 from html2word.parser.dom_tree import DOMNode
 from html2word.word_builder.style_mapper import StyleMapper
@@ -577,10 +577,10 @@ class TableBuilder:
 
             elif child.is_element:
                 if child.tag == 'br':
-                    # Line break - add new paragraph
-                    paragraph = word_cell.add_paragraph()
-                    # Apply paragraph-level styles (NO box_model in table cells, NO background-color)
-                    self.style_mapper.apply_paragraph_style(paragraph, para_styles, box_model=None)
+                    # Line break in table cell - add line break (soft return), not new paragraph
+                    # This preserves HTML <br/> behavior in table cells
+                    logger.debug(f"Found <br> tag in table cell, adding line break")
+                    paragraph.add_run('\n')
                     has_content = True
 
                 elif child.tag == 'img':
@@ -598,6 +598,11 @@ class TableBuilder:
                     if has_content:
                         # Create new paragraph for block element
                         paragraph = word_cell.add_paragraph()
+                        # Apply paragraph spacing for multiple paragraphs in table cells
+                        # This ensures proper spacing between <p> tags in HTML
+                        if child.tag == 'p':
+                            # Add space before paragraph for separation (except for first paragraph)
+                            paragraph.paragraph_format.space_before = Pt(6)  # Small spacing between paragraphs
                     # Process block content and update paragraph reference
                     paragraph = self._add_cell_block_content(paragraph, child, cell_styles)
                     has_content = True
@@ -704,6 +709,13 @@ class TableBuilder:
                     self.style_mapper.apply_run_style(run, merged_styles)
                     has_content_in_paragraph = True
 
+            elif child.is_element and child.tag == 'br':
+                # Handle <br> tags inside block elements like <p>
+                # Add line break (soft return) within the current paragraph
+                logger.debug(f"Found <br> tag inside {node.tag}, adding line break")
+                paragraph.add_run('\n')
+                has_content_in_paragraph = True
+
             elif child.is_inline:
                 self._add_cell_inline_content(paragraph, child, merged_styles)
                 has_content_in_paragraph = True
@@ -717,6 +729,9 @@ class TableBuilder:
                     if 'background-color' in para_styles:
                         del para_styles['background-color']
                     self.style_mapper.apply_paragraph_style(paragraph, para_styles, box_model=None)
+                    # Add spacing for nested <p> tags
+                    if child.tag == 'p':
+                        paragraph.paragraph_format.space_before = Pt(6)
                     has_content_in_paragraph = False
 
                 # Recursively process the nested block element
@@ -754,6 +769,11 @@ class TableBuilder:
                 if text.strip():
                     run = paragraph.add_run(text)
                     self.style_mapper.apply_run_style(run, merged_styles)
+
+            elif child.is_element and child.tag == 'br':
+                # Handle <br> tags inside inline elements
+                logger.debug(f"Found <br> tag inside inline element {node.tag}, adding line break")
+                paragraph.add_run('\n')
 
             elif child.is_inline:
                 # Nested inline
