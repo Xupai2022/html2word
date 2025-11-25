@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <style>
+        .green-bg {
+            background-color: #d4edda;
+            padding: 20px;
+        }
+        .white-p {
+            background-color: white;
+            padding: 5px;
+        }
+        .yellow-p {
+            background-color: #fff3cd;
+            padding: 5px;
+        }
+        .transparent-p {
+            background-color: transparent;
+        }
+        .blue-bg {
+            background-color: #cfe2ff;
+            padding: 15px;
+        }
+    </style>
+</head>
+<body>
+    <h2>Test 1: Green container with white paragraph (should NOT show white bg)</h2>
+    <div class="green-bg">
+        <p class="white-p">This paragraph has explicit white background - should be transparent in table cell</p>
+        <p>This paragraph has no explicit background - should use container's green</p>
+    </div>
+
+    <h2>Test 2: Green container with colored paragraph (should show yellow bg)</h2>
+    <div class="green-bg">
+        <p class="yellow-p">This paragraph has yellow background - should show yellow on green</p>
+    </div>
+
+    <h2>Test 3: Blue container with transparent paragraph</h2>
+    <div class="blue-bg">
+        <p class="transparent-p">This paragraph is explicitly transparent - should use container's blue</p>
+    </div>
+
+    <h2>Test 4: No container background</h2>
+    <p class="white-p">This white paragraph is not in a colored container - should work normally</p>
+</body>
+</html>

@@ -815,9 +815,14 @@ class DocumentBuilder:
             target_width_px = int(width_pt * 96 / 72)
             target_height_px = int(height_pt * 96 / 72)
 
+            # Calculate scaling factors for text positioning
+            scale_x = target_width_px / original_width if original_width > 0 else 1.0
+            scale_y = target_height_px / original_height if original_height > 0 else 1.0
+
             if bg_img.size != (target_width_px, target_height_px):
                 bg_img = bg_img.resize((target_width_px, target_height_px), Image.Resampling.LANCZOS)
                 logger.debug(f"Resized from {original_width}x{original_height} to {target_width_px}x{target_height_px}")
+                logger.debug(f"Scale factors: x={scale_x:.3f}, y={scale_y:.3f}")
 
             # Convert to RGBA to support transparency
             if bg_img.mode != 'RGBA':
@@ -826,11 +831,25 @@ class DocumentBuilder:
             # Draw text overlays
             draw = ImageDraw.Draw(bg_img)
 
+            # Calculate font size based on scaling (default 14pt scaled)
+            base_font_size = 14
+            scaled_font_size = max(8, int(base_font_size * min(scale_x, scale_y)))
+
             # Try to load a font (fallback to default if not available)
             try:
-                font = ImageFont.truetype("arial.ttf", 14)
+                font = ImageFont.truetype("arial.ttf", scaled_font_size)
+                logger.debug(f"Using Arial font with size {scaled_font_size}")
             except:
-                font = ImageFont.load_default()
+                try:
+                    # Try alternative font paths
+                    import os
+                    if os.name == 'nt':  # Windows
+                        font = ImageFont.truetype("C:/Windows/Fonts/arial.ttf", scaled_font_size)
+                    else:  # Linux/Mac
+                        font = ImageFont.truetype("/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf", scaled_font_size)
+                except:
+                    font = ImageFont.load_default()
+                    logger.debug("Using default font")
 
             # Process text children
             for child in node.children:
@@ -857,12 +876,16 @@ class DocumentBuilder:
                     top_pt = UnitConverter.to_pt(top_str)
                     left_pt = UnitConverter.to_pt(left_str)
 
-                    # Convert to pixels
-                    top_px = int(top_pt * 96 / 72)
-                    left_px = int(left_pt * 96 / 72)
+                    # Convert to pixels with scaling applied
+                    # Use the scale factors calculated from the image resize
+                    top_px = int(top_pt * 96 / 72 * scale_y)
+                    left_px = int(left_pt * 96 / 72 * scale_x)
 
-                    # Apply leftward offset to compensate for font rendering
-                    left_px = max(0, left_px - 40)
+                    # Log positioning details for debugging
+                    logger.debug(f"Text positioning for '{text_content.strip()[:20]}':")
+                    logger.debug(f"  CSS position: top={top_str}, left={left_str}")
+                    logger.debug(f"  Points: top_pt={top_pt:.2f}, left_pt={left_pt:.2f}")
+                    logger.debug(f"  Pixels (scaled): top_px={top_px}, left_px={left_px}")
 
                     # Get text color (from inline_styles first, then computed_styles)
                     color = '#000000'
