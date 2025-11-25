@@ -19,7 +19,11 @@
       "Bash(git -C . status)",
       "Bash(git commit -m \"$(cat <<''EOF''\nfix: 使用PIL实现背景图片与文本的完美合成\n\n- 添加 _composite_background_with_text 方法实现图片文本合成\n- 使用 PIL/Pillow 库将文本直接绘制到背景图片上\n- 正确处理文本位置、颜色和字体\n- 移除之前将文本作为单独段落添加的方案\n- 生成合成后的 PNG 图片直接插入文档\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude <noreply@anthropic.com>\nEOF\n)\")",
       "Bash(git push:*)",
-      "Bash(git commit -m \"$(cat <<''EOF''\nfix: 改进section元素处理和边框检测逻辑\n\n- 支持section元素的grid/flex布局转换为表格\n- 新增_has_significant_border方法检测元素是否有明显边框\n- 改进_should_wrap_in_styled_table逻辑，允许带边框的section在表格单元格内嵌套包装\n- 添加更详细的调试日志以便追踪样式应用\n- 修复section等容器元素的处理逻辑\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude <noreply@anthropic.com>\nEOF\n)\")"
+      "Bash(git commit -m \"$(cat <<''EOF''\nfix: 改进section元素处理和边框检测逻辑\n\n- 支持section元素的grid/flex布局转换为表格\n- 新增_has_significant_border方法检测元素是否有明显边框\n- 改进_should_wrap_in_styled_table逻辑，允许带边框的section在表格单元格内嵌套包装\n- 添加更详细的调试日志以便追踪样式应用\n- 修复section等容器元素的处理逻辑\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude <noreply@anthropic.com>\nEOF\n)\")",
+      "Bash(git commit:*)",
+      "Bash(timeout 120 python:*)",
+      "Bash(timeout 10 python:*)",
+      "Bash(timeout 30 python:*)"
     ],
     "deny": [],
     "ask": []

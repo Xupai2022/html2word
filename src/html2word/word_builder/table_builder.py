@@ -29,6 +29,44 @@ class TableBuilder:
         self.style_mapper = StyleMapper()
         self.paragraph_builder = ParagraphBuilder(document)
 
+    @staticmethod
+    def _normalize_whitespace(text: str) -> str:
+        """
+        Normalize whitespace in text while preserving leading/trailing spaces.
+
+        This function collapses multiple consecutive whitespace characters (spaces, tabs,
+        newlines) into a single space, but preserves single leading and trailing spaces.
+        This is important for HTML rendering where spaces between inline elements are significant.
+
+        Examples:
+            "  hello  world  " -> " hello world "
+            "hello\n\n  world" -> "hello world"
+            "  text  " -> " text "
+
+        Args:
+            text: Input text to normalize
+
+        Returns:
+            Normalized text with collapsed whitespace but preserved boundaries
+        """
+        if not text:
+            return ""
+
+        # Check if text has leading/trailing whitespace before normalization
+        has_leading_space = text and text[0].isspace()
+        has_trailing_space = text and text[-1].isspace()
+
+        # Collapse all whitespace
+        normalized = ' '.join(text.split())
+
+        # Restore leading/trailing space if originally present
+        if has_leading_space and normalized:
+            normalized = ' ' + normalized
+        if has_trailing_space and normalized:
+            normalized = normalized + ' '
+
+        return normalized
+
     def build_table(self, table_node: DOMNode) -> Optional[object]:
         """
         Build a Word table from HTML table node.
@@ -467,6 +505,31 @@ class TableBuilder:
             cell_node: Cell DOM node
             cell_styles: Merged styles (row + cell)
         """
+        # Make a copy to avoid modifying the original dict
+        cell_styles = cell_styles.copy()
+
+        # Apply default font and size for table cells if not specified or using browser defaults
+        # This ensures tables without explicit font styles still render with appropriate fonts
+        # Check if font-family is missing, empty, or a browser default (Segoe UI, Arial without explicit CSS)
+        current_font = cell_styles.get('font-family', '')
+
+        if not current_font or current_font in ('Segoe UI', 'sans-serif'):
+            cell_styles['font-family'] = 'Microsoft YaHei, Arial, sans-serif'
+            logger.debug(f"Applied default font-family (was: {repr(current_font)})")
+
+        # Check if font-size is missing, empty, or too small (likely browser default)
+        current_size = cell_styles.get('font-size', '')
+        # Handle both string ('12px') and numeric (9.0, 12.0, 16.0) formats
+        # Replace small sizes (9px, 10px, 11px, 12px) with Chinese document standard (14px/10.5pt)
+        should_replace_size = (
+            not current_size or
+            current_size in ('9px', '10px', '11px', '12px', '16px') or
+            (isinstance(current_size, (int, float)) and current_size <= 12.0)
+        )
+        if should_replace_size:
+            cell_styles['font-size'] = '14px'  # Common size for Chinese documents (10.5pt)
+            logger.debug(f"Applied default font-size (was: {repr(current_size)})")
+
         # Get or create first paragraph
         if word_cell.paragraphs:
             paragraph = word_cell.paragraphs[0]
@@ -497,11 +560,16 @@ class TableBuilder:
 
         # Process all children
         for child in cell_node.children:
+            # Skip Element UI hidden-columns div (contains column templates, not visible content)
+            if child.is_element and self._should_skip_element(child):
+                logger.debug(f"Skipping element with class '{child.attributes.get('class', '')}' in table cell")
+                continue
+
             if child.is_text:
                 text = child.text or ""
-                # Normalize whitespace
-                text = ' '.join(text.split())
-                if text:
+                # Normalize whitespace while preserving leading/trailing spaces
+                text = self._normalize_whitespace(text)
+                if text.strip():  # Only add if there's non-whitespace content
                     # Add text with merged styles
                     run = paragraph.add_run(text)
                     self.style_mapper.apply_run_style(run, cell_styles)
@@ -530,7 +598,8 @@ class TableBuilder:
                     if has_content:
                         # Create new paragraph for block element
                         paragraph = word_cell.add_paragraph()
-                    self._add_cell_block_content(paragraph, child, cell_styles)
+                    # Process block content and update paragraph reference
+                    paragraph = self._add_cell_block_content(paragraph, child, cell_styles)
                     has_content = True
 
                 elif child.tag in ('strong', 'b', 'em', 'i', 'u', 'span', 'a'):
@@ -547,8 +616,8 @@ class TableBuilder:
                 else:
                     # Other elements - extract text content
                     text = child.get_text_content()
-                    text = ' '.join(text.split())
-                    if text:
+                    text = self._normalize_whitespace(text)
+                    if text.strip():
                         run = paragraph.add_run(text)
                         # Merge styles
                         element_styles = cell_styles.copy()
@@ -556,14 +625,55 @@ class TableBuilder:
                         self.style_mapper.apply_run_style(run, element_styles)
                         has_content = True
 
+    def _should_skip_element(self, node: DOMNode) -> bool:
+        """
+        Check if an element should be skipped during table cell content processing.
+
+        Element UI tables have hidden template elements that should not be rendered:
+        - hidden-columns: Contains column definition templates
+        - Other hidden/template elements marked by specific classes
+
+        Args:
+            node: DOM node to check
+
+        Returns:
+            True if element should be skipped, False otherwise
+        """
+        if not node.is_element:
+            return False
+
+        # Check for hidden-columns class (Element UI column templates)
+        classes = node.attributes.get('class', '')
+        if isinstance(classes, list):
+            classes = ' '.join(classes)
+        elif not isinstance(classes, str):
+            classes = ''
+
+        # Skip hidden-columns div (Element UI table column templates)
+        if 'hidden-columns' in classes:
+            return True
+
+        # Skip elements with display:none or visibility:hidden
+        computed_styles = node.computed_styles or {}
+        display = computed_styles.get('display', '')
+        visibility = computed_styles.get('visibility', '')
+
+        if display == 'none' or visibility == 'hidden':
+            return True
+
+        return False
+
     def _add_cell_block_content(self, paragraph, node: DOMNode, base_styles: Dict[str, Any]):
         """
         Add content from a block element to paragraph.
 
         Args:
-            paragraph: Word paragraph
+            paragraph: Word paragraph (the current paragraph to write to)
             node: Block element node
             base_styles: Base styles from cell/row
+
+        Returns:
+            The last paragraph used (may create new paragraphs for nested blocks)
         """
         # Merge styles - node styles override base
         merged_styles = base_styles.copy()
@@ -578,25 +688,51 @@ class TableBuilder:
         # CRITICAL FIX: In table cells, do NOT apply box_model to avoid extra spacing
         self.style_mapper.apply_paragraph_style(paragraph, merged_styles, box_model=None)
 
+        # Get the parent cell to add new paragraphs if needed
+        word_cell = paragraph._parent
+
+        # Track if current paragraph has content
+        has_content_in_paragraph = False
+
         # Process children
         for child in node.children:
             if child.is_text:
                 text = child.text or ""
-                text = ' '.join(text.split())
-                if text:
+                text = self._normalize_whitespace(text)
+                if text.strip():
                     run = paragraph.add_run(text)
                     self.style_mapper.apply_run_style(run, merged_styles)
+                    has_content_in_paragraph = True
 
             elif child.is_inline:
                 self._add_cell_inline_content(paragraph, child, merged_styles)
+                has_content_in_paragraph = True
+
+            elif child.is_element and child.tag in ('p', 'div'):
+                # Nested block element (p, div) - each should be on a new paragraph
+                if has_content_in_paragraph:
+                    # Current paragraph already has content, create new one
+                    paragraph = word_cell.add_paragraph()
+                    para_styles = merged_styles.copy()
+                    if 'background-color' in para_styles:
+                        del para_styles['background-color']
+                    self.style_mapper.apply_paragraph_style(paragraph, para_styles, box_model=None)
+                    has_content_in_paragraph = False
+
+                # Recursively process the nested block element
+                paragraph = self._add_cell_block_content(paragraph, child, base_styles)
+                has_content_in_paragraph = True
 
             else:
-                # Nested block - just extract text
+                # Other nested block elements - extract text
                 text = child.get_text_content()
-                text = ' '.join(text.split())
-                if text:
+                text = self._normalize_whitespace(text)
+                if text.strip():
                     run = paragraph.add_run(text)
                     self.style_mapper.apply_run_style(run, merged_styles)
+                    has_content_in_paragraph = True
+
+        return paragraph
 
     def _add_cell_inline_content(self, paragraph, node: DOMNode, base_styles: Dict[str, Any]):
         """
@@ -614,8 +750,8 @@ class TableBuilder:
         for child in node.children:
             if child.is_text:
                 text = child.text or ""
-                text = ' '.join(text.split())
-                if text:
+                text = self._normalize_whitespace(text)
+                if text.strip():
                     run = paragraph.add_run(text)
                     self.style_mapper.apply_run_style(run, merged_styles)
 
@@ -626,8 +762,8 @@ class TableBuilder:
             else:
                 # Block inside inline - extract text
                 text = child.get_text_content()
-                text = ' '.join(text.split())
-                if text:
+                text = self._normalize_whitespace(text)
+                if text.strip():
                     run = paragraph.add_run(text)
                     self.style_mapper.apply_run_style(run, merged_styles)
 
@@ -677,8 +813,8 @@ class TableBuilder:
             logger.warning(f"Error building nested table: {e}")
             # Fallback: just extract text content
             text = table_node.get_text_content()
-            text = ' '.join(text.split())
-            if text and word_cell.paragraphs:
+            text = self._normalize_whitespace(text)
+            if text.strip() and word_cell.paragraphs:
                 para = word_cell.paragraphs[0]
                 para.add_run(text)
             return None

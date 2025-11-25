@@ -8,7 +8,7 @@ Helvetica: "Arial"
 Verdana: "Verdana"
 Tahoma: "Tahoma"
 "Trebuchet MS": "Trebuchet MS"
-"Segoe UI": "Segoe UI"
+"Segoe UI": "Microsoft YaHei"  # Map to Chinese-friendly font for better document rendering
 Calibri: "Calibri"
 "Lucida Grande": "Lucida Sans Unicode"
 "Lucida Sans": "Lucida Sans Unicode"

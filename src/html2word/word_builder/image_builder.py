@@ -260,6 +260,11 @@ class ImageBuilder:
             width_val = self._parse_dimension(width)
             height_val = self._parse_dimension(height)
 
+            # Skip SVGs with zero or very small dimensions
+            if width_val < 1 or height_val < 1:
+                logger.debug(f"Skipping SVG with zero or very small dimensions: {width_val}x{height_val}")
+                return None
+
             # Try method 1: BrowserSVGConverter (best for complex charts)
             png_data = self._convert_svg_with_browser(svg_content, width_val, height_val)
             if png_data:
@@ -560,6 +565,11 @@ class ImageBuilder:
             # Parse dimensions
             width_val = int(self._parse_dimension(width))
             height_val = int(self._parse_dimension(height))
+
+            # Skip SVGs with zero or very small dimensions
+            if width_val < 1 or height_val < 1:
+                logger.debug(f"Skipping fallback placeholder for zero-dimension SVG: {width_val}x{height_val}")
+                return None
 
             # Create a simple placeholder image
             img = Image.new('RGB', (width_val, height_val), color='#F0F0F0')

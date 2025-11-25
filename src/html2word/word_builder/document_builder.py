@@ -87,6 +87,12 @@ class DocumentBuilder:
         if not node.is_element:
             return
 
+        # CRITICAL: Skip hidden/template elements (contains templates, not visible content)
+        # This must be checked BEFORE any other processing
+        if self._should_skip_hidden_element(node):
+            logger.debug(f"Skipping hidden/template element: {node.tag} with class='{node.attributes.get('class', '')}'")
+            return
+
         # Debug: Log when we encounter SVG nodes
         if node.tag == 'svg':
             logger.debug(f"_process_node encountered SVG element")
@@ -134,7 +140,12 @@ class DocumentBuilder:
             if isinstance(div_classes, list):
                 div_classes = ' '.join(div_classes)
 
-            if any(cls in div_classes for cls in ['el-table', 'el-table__header-wrapper', 'el-table__body-wrapper',
+            # Skip Element UI hidden-columns div (contains column templates, not visible content)
+            if 'hidden-columns' in div_classes:
+                logger.info(f"!!! SKIPPING Element UI hidden-columns div: {div_classes}")
+                print(f"!!! SKIPPING hidden-columns div")
+                return
+            elif any(cls in div_classes for cls in ['el-table', 'el-table__header-wrapper', 'el-table__body-wrapper',
                                                      'el-table__fixed-wrapper', 'el-table__fixed-header-wrapper',
                                                      'el-table__fixed-body-wrapper', 'el-table__append-wrapper',
                                                      'el-table__empty-wrapper']):
@@ -596,6 +607,65 @@ class DocumentBuilder:
 
         bg_image = node.inline_styles.get('background-image', '')
         if bg_image and bg_image not in ('', 'none', 'initial', 'inherit') and 'url(' in bg_image:
+            return True
+
+        return False
+
+    def _should_skip_hidden_element(self, node: DOMNode) -> bool:
+        """
+        Check if an element should be skipped because it's hidden or is a template.
+
+        This is a UNIVERSAL method that handles:
+        - Element UI hidden-columns (column templates)
+        - Elements with display:none
+        - Elements with visibility:hidden
+        - Template elements from various frameworks
+        - Other framework-specific hidden elements
+
+        Args:
+            node: DOM node
+
+        Returns:
+            True if element should be skipped
+        """
+        if not node.is_element:
+            return False
+
+        # Get element classes
+        classes = node.attributes.get('class', '')
+        if isinstance(classes, list):
+            classes = ' '.join(classes)
+        elif not isinstance(classes, str):
+            classes = ''
+
+        # Skip Element UI hidden-columns (column definition templates)
+        if 'hidden-columns' in classes:
+            return True
+
+        # Skip other common template/hidden classes from various frameworks
+        # Vue.js templates
+        if 'v-show-false' in classes or 'v-if-false' in classes:
+            return True
+
+        # React/Angular hidden elements
+        if 'hidden' in classes or 'd-none' in classes or 'display-none' in classes:
+            return True
+
+        # Check computed styles for display:none or visibility:hidden
+        if node.computed_styles:
+            display = node.computed_styles.get('display', '')
+            visibility = node.computed_styles.get('visibility', '')
+
+            if display == 'none' or visibility == 'hidden':
+                return True
+
+        # Check for template tags (Vue, Angular, etc.)
+        if node.tag in ('template', 'script', 'style', 'noscript'):
+            return True
+
+        # Check for aria-hidden="true" (accessibility hidden elements)
+        aria_hidden = node.attributes.get('aria-hidden', '')
+        if aria_hidden == 'true' or aria_hidden is True:
             return True
 
         return False
