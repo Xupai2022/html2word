@@ -652,18 +652,29 @@ class TableBuilder:
                     has_content = True
 
 
-        # FINAL FIX: Force left alignment for all paragraphs with multiline content
-        # This addresses the Major Types column issue where content with line breaks
-        # gets JUSTIFY alignment instead of LEFT
+        # FINAL FIX: Clean up extra line breaks and force left alignment
+        # This addresses the Major Types column issues with extra line breaks
         for para in word_cell.paragraphs:
-            if para.text.strip():  # Only check paragraphs with text
-                # Check if paragraph contains line breaks (multiline content)
-                if '\n' in para.text:
-                    # Force left alignment unless explicitly set to center/right
+            if para.text or para.runs:  # Process all paragraphs with content
+                # Clean up extra line breaks in runs
+                if para.runs:
+                    # Remove leading newlines from first run
+                    if para.runs[0].text and para.runs[0].text.startswith('\n'):
+                        para.runs[0].text = para.runs[0].text.lstrip('\n')
+                        logger.debug("Removed leading line breaks from table cell")
+                    
+                    # Remove trailing newlines from last run
+                    if para.runs[-1].text and para.runs[-1].text.endswith('\n'):
+                        para.runs[-1].text = para.runs[-1].text.rstrip('\n')
+                        logger.debug("Removed trailing line breaks from table cell")
+                
+                # Force left alignment for multiline content
+                if para.text.strip() and '\n' in para.text:
                     current_alignment = para.paragraph_format.alignment
-                    if current_alignment not in [1, 2]:  # Not CENTER (1) or RIGHT (2)
-                        para.paragraph_format.alignment = 0  # Force LEFT (0)
-                        logger.debug(f"FINAL FIX: Forced left alignment for multiline paragraph in table cell")
+                    if current_alignment not in [1, 2]:  # Not CENTER or RIGHT
+                        para.paragraph_format.alignment = 0  # Force LEFT
+                        logger.debug("Forced left alignment for multiline paragraph")
+
 
     def _process_cell_element_children(self, paragraph, element: DOMNode, base_styles: Dict[str, Any]):
         """
@@ -693,7 +704,15 @@ class TableBuilder:
                     # Inline elements - process with their own styles
                     self._add_cell_inline_content(paragraph, child, element_styles)
                 elif child.tag == 'br':
-                    paragraph.add_run('\n')
+                    # Smart handling of <br> tags to avoid extra line breaks
+                    # Check if we already have content and if it doesn't end with newline
+                    existing_text = ''.join(run.text or '' for run in paragraph.runs)
+                    # Only add line break if we have content before and no trailing newline
+                    if existing_text and not existing_text.endswith('\n'):
+                        paragraph.add_run('\n')
+                    elif not existing_text:
+                        # Skip br at the beginning of content
+                        logger.debug("Skipped <br> at beginning of table cell")
                 else:
                     # Recursively process other elements
                     self._process_cell_element_children(paragraph, child, element_styles)
