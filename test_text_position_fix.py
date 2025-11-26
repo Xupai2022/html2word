@@ -31,7 +31,8 @@ def test_text_position():
 
     try:
         # Convert HTML file to Word document
-        output_file = "test_text_position_output.docx"
+        import time
+        output_file = f"test_text_position_output_{int(time.time())}.docx"
         converter.convert_file(html_file, output_file)
 
         print(f"✓ Conversion successful! Output saved to: {output_file}")
@@ -63,23 +64,23 @@ def check_fix_applied():
     fixes_applied = []
     fixes_missing = []
 
-    # Check for scale factor calculation
-    if 'scale_x = target_width_px / original_width' in content:
-        fixes_applied.append("✓ Scale factor calculation added")
-    else:
-        fixes_missing.append("✗ Scale factor calculation missing")
-
     # Check for removal of hardcoded offset
     if 'left_px - 40' not in content:
         fixes_applied.append("✓ Hardcoded offset removed")
     else:
         fixes_missing.append("✗ Hardcoded offset still present")
 
-    # Check for scaled pixel calculation
-    if '* scale_y' in content and '* scale_x' in content:
-        fixes_applied.append("✓ Scaled pixel calculation added")
+    # Check for direct pixel conversion without scaling
+    if 'CSS positions are relative to the container' in content:
+        fixes_applied.append("✓ Direct pixel conversion without scaling")
     else:
-        fixes_missing.append("✗ Scaled pixel calculation missing")
+        fixes_missing.append("✗ Direct pixel conversion missing")
+
+    # Check that scaling is NOT applied to text position
+    if '* scale_y' not in content or '* scale_x' not in content:
+        fixes_applied.append("✓ Scaling removed from text position calculation")
+    else:
+        fixes_missing.append("✗ Scaling still applied to text position")
 
     # Check for debug logging
     if 'Text positioning for' in content:

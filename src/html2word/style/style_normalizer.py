@@ -253,12 +253,13 @@ class StyleNormalizer:
         return 'none'
 
     @classmethod
-    def normalize_text_align(cls, value: str) -> str:
+    def normalize_text_align(cls, value: str, context: str = None) -> str:
         """
         Normalize text-align value.
 
         Args:
             value: Text align value
+            context: Optional context (e.g., 'table_cell')
 
         Returns:
             Normalized value
@@ -271,6 +272,10 @@ class StyleNormalizer:
                 return 'left'
             elif value_lower == 'end':
                 return 'right'
+            # CRITICAL: Override justify with left for table cells
+            # Justified text in table cells causes poor wrapping
+            elif value_lower == 'justify' and context == 'table_cell':
+                return 'left'
             return value_lower
 
         return 'left'

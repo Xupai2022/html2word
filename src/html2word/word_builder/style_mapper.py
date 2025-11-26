@@ -98,9 +98,13 @@ class StyleMapper:
 
         # Text alignment
         if 'text-align' in styles:
-            alignment = self._map_text_align(styles['text-align'])
+            # DEBUG: Log text alignment mapping
+            css_align = styles['text-align']
+            alignment = self._map_text_align(css_align)
+            logger.debug(f"ALIGNMENT DEBUG: CSS text-align='{css_align}' mapped to Word alignment={alignment}")
             if alignment is not None:
                 fmt.alignment = alignment
+                logger.debug(f"ALIGNMENT DEBUG: Set paragraph alignment to {alignment}")
 
         # Line height
         # CRITICAL FIX: Word's line_spacing behaves differently than CSS line-height
