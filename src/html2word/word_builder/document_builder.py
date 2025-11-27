@@ -1367,7 +1367,10 @@ class DocumentBuilder:
 
     def _wrap_div_in_styled_table(self, node: DOMNode):
         """
-        Wrap a styled div/section in a single-cell table to preserve background/borders.
+        Wrap a styled div/section in a table to preserve background/borders.
+
+        Special handling for sections containing chart-panel-header elements:
+        - These get their own row/cell with background color
 
         Args:
             node: DOM node with styling (div, section, etc.)
@@ -1375,30 +1378,138 @@ class DocumentBuilder:
         try:
             logger.debug(f"Wrapping styled {node.tag} in table (classes={node.attributes.get('class', [])})")
 
-            # Create 1x1 table (no spacing before - previous element's space_after handles that)
-            table = self.document.add_table(rows=1, cols=1)
-            cell = table.rows[0].cells[0]
+            # Check if this section contains chart-panel-header elements that need separate cells
+            header_children = []
+            other_children = []
 
-            # Apply div styles to cell
-            if node.computed_styles:
-                from html2word.word_builder.style_mapper import StyleMapper
-                mapper = StyleMapper()
-                box_model = node.layout_info.get('box_model') if hasattr(node, 'layout_info') else None
-                mapper.apply_table_cell_style(cell, node.computed_styles, box_model)
-
-            # Clear default empty paragraph if present
-            if len(cell.paragraphs) == 1 and not cell.paragraphs[0].text:
-                p = cell.paragraphs[0]._element
-                p.getparent().remove(p)
-
-            # Process children within the cell
-            original_doc = self.document
             for child in node.children:
-                # Log processing of each child for debugging
-                if child.tag:
-                    logger.debug(f"Processing child {child.tag} (classes={child.attributes.get('class', [])}) in table cell")
-                self._process_node_in_cell(child, cell, original_doc)
-            self.document = original_doc
+                # Check if this child is or contains a chart-panel-header
+                is_header = False
+                if child.attributes.get('class'):
+                    classes = child.attributes.get('class', [])
+                    if 'chart-panel-header' in classes:
+                        is_header = True
+                        logger.debug(f"Found chart-panel-header child: {child.tag}")
+
+                if is_header:
+                    header_children.append(child)
+                else:
+                    other_children.append(child)
+
+            # Determine number of rows needed
+            num_rows = 1
+            if header_children:
+                # Each header gets its own row, plus one for other content
+                num_rows = len(header_children) + (1 if other_children else 0)
+
+            # Create table with appropriate number of rows
+            table = self.document.add_table(rows=num_rows, cols=1)
+
+            # Add table borders for better visual structure
+            # This is especially important for section tables
+            self._add_table_borders(table, node)
+
+            current_row = 0
+
+            # Process header children first (each in its own row/cell)
+            for header_child in header_children:
+                cell = table.rows[current_row].cells[0]
+
+                # Apply header styles to the cell (especially background color)
+                if header_child.computed_styles:
+                    from html2word.word_builder.style_mapper import StyleMapper
+                    from html2word.style.box_model import BoxModel, BoxEdge
+                    mapper = StyleMapper()
+
+                    # Use header's styles for the cell
+                    cell_styles = header_child.computed_styles.copy()
+                    box_model = header_child.layout_info.get('box_model') if hasattr(header_child, 'layout_info') else None
+
+                    # If no box_model or padding, create padding based on height to simulate vertical spacing
+                    if 'height' in cell_styles and cell_styles['height']:
+                        from html2word.utils.units import UnitConverter
+                        height_pt = UnitConverter.to_pt(str(cell_styles['height']))
+
+                        # If box_model doesn't exist or has no padding, create one with appropriate padding
+                        if not box_model or (box_model.padding.top == 0 and box_model.padding.bottom == 0):
+                            # Calculate padding: for a 28px height with 12px font, add some padding
+                            # This simulates the visual effect of the height property
+                            font_size_pt = 12  # Default font size
+                            if 'font-size' in cell_styles:
+                                font_size_pt = UnitConverter.to_pt(str(cell_styles['font-size']))
+
+                            # Add padding to achieve the desired height effect
+                            # Typically, (height - font_size) / 2 for top and bottom
+                            vertical_padding = max(3, (height_pt - font_size_pt) / 2)  # At least 3pt padding
+
+                            if not box_model:
+                                # Create a new box model with padding
+                                box_model = BoxModel()
+                                box_model.padding = BoxEdge(
+                                    top=vertical_padding,
+                                    right=6.0,  # Small horizontal padding
+                                    bottom=vertical_padding,
+                                    left=6.0
+                                )
+                            else:
+                                # Update existing box model's padding
+                                box_model.padding.top = max(box_model.padding.top, vertical_padding)
+                                box_model.padding.bottom = max(box_model.padding.bottom, vertical_padding)
+
+                            logger.debug(f"Added cell padding: top={vertical_padding:.1f}pt, bottom={vertical_padding:.1f}pt for height={height_pt}pt")
+
+                    # Apply background to cell, not just paragraph
+                    mapper.apply_table_cell_style(cell, cell_styles, box_model)
+
+                    # Also set row height if specified
+                    if 'height' in cell_styles:
+                        from html2word.utils.units import UnitConverter
+                        from docx.oxml import parse_xml
+                        from docx.oxml.ns import nsdecls
+
+                        height_pt = UnitConverter.to_pt(str(cell_styles['height']))
+                        if height_pt > 0:
+                            tr = table.rows[current_row]._element
+                            trPr = tr.get_or_add_trPr()
+                            trHeight = parse_xml(f'<w:trHeight {nsdecls("w")} w:val="{int(height_pt * 20)}" w:hRule="exact"/>')
+                            trPr.append(trHeight)
+                            logger.debug(f"Set row height to {height_pt}pt for chart-panel-header")
+
+                # Clear default empty paragraph if present
+                if len(cell.paragraphs) == 1 and not cell.paragraphs[0].text:
+                    p = cell.paragraphs[0]._element
+                    p.getparent().remove(p)
+
+                # Process the header content
+                original_doc = self.document
+                self._process_node_in_cell(header_child, cell, original_doc)
+                self.document = original_doc
+
+                current_row += 1
+
+            # Process other children in remaining cell(s)
+            if other_children:
+                cell = table.rows[current_row].cells[0]
+
+                # Apply section styles to cell (if not already handled by headers)
+                if node.computed_styles and not header_children:
+                    from html2word.word_builder.style_mapper import StyleMapper
+                    mapper = StyleMapper()
+                    box_model = node.layout_info.get('box_model') if hasattr(node, 'layout_info') else None
+                    mapper.apply_table_cell_style(cell, node.computed_styles, box_model)
+
+                # Clear default empty paragraph if present
+                if len(cell.paragraphs) == 1 and not cell.paragraphs[0].text:
+                    p = cell.paragraphs[0]._element
+                    p.getparent().remove(p)
+
+                # Process other children
+                original_doc = self.document
+                for child in other_children:
+                    if child.tag:
+                        logger.debug(f"Processing child {child.tag} (classes={child.attributes.get('class', [])}) in table cell")
+                    self._process_node_in_cell(child, cell, original_doc)
+                self.document = original_doc
 
             # Apply spacing after table (from div's margin-bottom)
             self._apply_spacing_after_table(node)
@@ -1406,6 +1517,80 @@ class DocumentBuilder:
         except Exception as e:
             logger.warning(f"Error wrapping div in table: {e}, falling back")
             self._process_children(node)
+
+    def _add_table_borders(self, table, node=None):
+        """
+        Add borders to a table using the original CSS border style if available.
+
+        Args:
+            table: python-docx Table object
+            node: Optional DOM node to extract border styles from
+        """
+        try:
+            from docx.oxml import parse_xml
+            from docx.oxml.ns import nsdecls
+
+            # Get the table element
+            tbl = table._element
+
+            # Default border style (similar to #dee3ed - light gray, thin)
+            border_size = "4"  # 0.5pt (4 = 0.5pt, 8 = 1pt)
+            border_color = "DEE3ED"  # Light gray color from original CSS
+
+            # Try to extract border style from node if provided
+            if node and node.computed_styles:
+                # Check for border styles
+                for side in ['top', 'right', 'bottom', 'left']:
+                    border_width = node.computed_styles.get(f'border-{side}-width', '')
+                    border_color_css = node.computed_styles.get(f'border-{side}-color', '')
+
+                    if border_width and '1px' in str(border_width):
+                        border_size = "4"  # 1px = 0.5pt in Word
+
+                    if border_color_css:
+                        # Convert CSS color to Word color (remove # and use uppercase)
+                        if border_color_css.startswith('#'):
+                            border_color = border_color_css[1:].upper()
+                        elif border_color_css.startswith('rgb'):
+                            # Try to parse RGB color
+                            import re
+                            rgb_match = re.match(r'rgb\((\d+),\s*(\d+),\s*(\d+)\)', border_color_css)
+                            if rgb_match:
+                                r, g, b = rgb_match.groups()
+                                border_color = f"{int(r):02X}{int(g):02X}{int(b):02X}"
+                        break  # Use first found color
+
+            # Create table borders element with extracted or default styles
+            tblBorders = parse_xml(f'''
+                <w:tblBorders {nsdecls("w")}>
+                    <w:top w:val="single" w:sz="{border_size}" w:space="0" w:color="{border_color}"/>
+                    <w:left w:val="single" w:sz="{border_size}" w:space="0" w:color="{border_color}"/>
+                    <w:bottom w:val="single" w:sz="{border_size}" w:space="0" w:color="{border_color}"/>
+                    <w:right w:val="single" w:sz="{border_size}" w:space="0" w:color="{border_color}"/>
+                    <w:insideH w:val="single" w:sz="{border_size}" w:space="0" w:color="{border_color}"/>
+                    <w:insideV w:val="single" w:sz="{border_size}" w:space="0" w:color="{border_color}"/>
+                </w:tblBorders>
+            ''')
+
+            # Add borders to table properties
+            tblPr = tbl.find('.//{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tblPr')
+            if tblPr is not None:
+                # Remove existing borders if present
+                existing_borders = tblPr.find('.//{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tblBorders')
+                if existing_borders is not None:
+                    tblPr.remove(existing_borders)
+                # Add new borders
+                tblPr.append(tblBorders)
+            else:
+                # Create table properties if not present
+                tblPr = parse_xml(f'<w:tblPr {nsdecls("w")}></w:tblPr>')
+                tblPr.append(tblBorders)
+                tbl.insert(0, tblPr)
+
+            logger.debug("Added borders to wrapper table")
+
+        except Exception as e:
+            logger.warning(f"Failed to add table borders: {e}")
 
     def _apply_spacing_before_table(self, node: DOMNode):
         """

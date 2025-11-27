@@ -115,13 +115,42 @@ class StyleMapper:
         if 'line-height' in styles:
             line_height = styles['line-height']
             try:
+                line_height_handled = False  # Track if we've already set line-height
+
+                # SPECIAL CASE: When height and line-height are equal, this is typically
+                # for vertical centering, not for actual line spacing
+                # Example: .chart-panel-header { height: 28px; line-height: 28px; }
+                # This should result in normal (1x) line spacing, not 2.33x
+                if 'height' in styles:
+                    height_value = styles['height']
+                    # Convert both to pt for comparison
+                    height_pt = None
+                    if isinstance(height_value, (int, float)):
+                        height_pt = float(height_value)
+                    else:
+                        height_pt = UnitConverter.to_pt(str(height_value))
+
+                    line_height_pt_check = None
+                    if isinstance(line_height, (int, float)):
+                        line_height_pt_check = float(line_height)
+                    else:
+                        line_height_pt_check = UnitConverter.to_pt(str(line_height))
+
+                    # If height and line-height are approximately equal (within 2pt tolerance),
+                    # use normal line spacing (1.0 or 1.15 for readability)
+                    if height_pt and line_height_pt_check and abs(height_pt - line_height_pt_check) < 2.0:
+                        fmt.line_spacing = 1.0  # Normal line spacing for vertical centering
+                        logger.debug(f"Line-height equals height ({line_height_pt_check:.1f}pt ≈ {height_pt:.1f}pt), using 1.0x for vertical centering")
+                        line_height_handled = True  # Mark as handled
+                        # IMPORTANT: Don't return here! We still need to process other styles like background-color
+
                 # CRITICAL FIX: CSS parser may have already converted line-height to pt (numeric)
                 # We need to distinguish between:
                 # 1. True multipliers (e.g., 1.5, 2.0) - typically < 3.0
                 # 2. Already-converted pt values (e.g., 16.5pt from "22px") - typically > 3.0
                 # Solution: If numeric value > 3.0, treat as pt and convert to multiplier
 
-                if isinstance(line_height, (int, float)):
+                if not line_height_handled and isinstance(line_height, (int, float)):
                     # Check if this is likely a pt value (> 3.0) or a true multiplier (<= 3.0)
                     if line_height > 3.0:
                         # This is likely an absolute value in pt, not a multiplier
@@ -145,7 +174,7 @@ class StyleMapper:
                             multiplier = min(multiplier, max_line_spacing)
                         fmt.line_spacing = multiplier
                         logger.debug(f"Line-height (multiplier): {line_height}x → {multiplier}x (max={max_line_spacing})")
-                else:
+                elif not line_height_handled:
                     # Parse absolute value (e.g., "22px", "16pt")
                     line_height_pt = UnitConverter.to_pt(str(line_height))
                     if line_height_pt:
@@ -291,6 +320,12 @@ class StyleMapper:
         try:
             from docx.oxml import parse_xml
             from docx.oxml.ns import nsdecls
+            import logging
+
+            logger.debug(f"Applying borders to cell: top=(w={border.top.width}, s={border.top.style}, c={border.top.color}), "
+                        f"left=(w={border.left.width}, s={border.left.style}, c={border.left.color}), "
+                        f"bottom=(w={border.bottom.width}, s={border.bottom.style}, c={border.bottom.color}), "
+                        f"right=(w={border.right.width}, s={border.right.style}, c={border.right.color})")
 
             tc = cell._element
             tcPr = tc.get_or_add_tcPr()
@@ -301,9 +336,14 @@ class StyleMapper:
             # Process each side
             for side_name, border_edge in [('top', border.top), ('left', border.left),
                                             ('bottom', border.bottom), ('right', border.right)]:
-                if border_edge.width > 0 and border_edge.style != 'none':
-                    # Convert pt to eighths of a point
-                    sz = int(border_edge.width * 8)
+                # More robust check: width should be > 0 and style should not be 'none' or empty
+                if border_edge.width > 0 and border_edge.style and border_edge.style != 'none':
+                    # Convert pt to eighths of a point (Word uses 1/8 pt units)
+                    # Ensure minimum width of 1/8 pt (sz=1) to avoid invisible borders
+                    sz = max(1, int(round(border_edge.width * 8)))
+
+                    logger.debug(f"Processing {side_name} border: width={border_edge.width}pt -> sz={sz}/8pt, "
+                               f"style={border_edge.style}, color={border_edge.color}")
 
                     # Map CSS border style to Word border style
                     word_style = self._map_border_style(border_edge.style)
@@ -319,6 +359,9 @@ class StyleMapper:
                     border_elements.append(
                         f'<w:{side_name} w:val="{word_style}" w:sz="{sz}" w:color="{color}"/>'
                     )
+                    logger.debug(f"Added {side_name} border: val={word_style}, sz={sz}, color={color}")
+                else:
+                    logger.debug(f"Skipping {side_name} border: width={border_edge.width}, style={border_edge.style}")
 
             # Only add tcBorders if we have at least one border
             if border_elements:
@@ -392,6 +435,13 @@ class StyleMapper:
         Returns:
             Word border style name
         """
+        import logging
+
+        # Handle None or empty string
+        if not css_style:
+            logger.debug(f"Border style is empty or None, defaulting to 'single'")
+            return 'single'
+
         style_map = {
             'solid': 'single',
             'dashed': 'dashed',
@@ -404,7 +454,12 @@ class StyleMapper:
             'none': 'none',
             'hidden': 'none'
         }
-        return style_map.get(css_style.lower(), 'single')
+
+        mapped_style = style_map.get(css_style.lower(), 'single')
+        if css_style.lower() not in style_map:
+            logger.debug(f"Unknown border style '{css_style}', defaulting to 'single'")
+
+        return mapped_style
 
     def _get_font_size_pt(self, font_size) -> Optional[float]:
         """Get font size in pt."""
