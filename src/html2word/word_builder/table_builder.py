@@ -348,6 +348,44 @@ class TableBuilder:
         if cell_node.computed_styles:
             merged_styles.update(cell_node.computed_styles)
 
+        # SPECIAL CASE: If cell has no background but contains a single main element with background,
+        # promote that background to the cell level for better visual effect
+        # This handles cases like <td><div class="chart-panel-header">...</div></td>
+        if not merged_styles.get('background-color') or merged_styles.get('background-color') in ('transparent', 'rgba(0,0,0,0)'):
+            # Check if cell has a single main content element
+            content_children = [child for child in cell_node.children
+                              if child.tag in ('div', 'section', 'article', 'header', 'footer', 'aside', 'nav')]
+
+            # If there's exactly one main content element, check its background
+            if len(content_children) == 1:
+                main_child = content_children[0]
+                child_bg = main_child.computed_styles.get('background-color')
+
+                # Also check for the special case of height=line-height (vertical centering)
+                child_height = main_child.computed_styles.get('height')
+                child_line_height = main_child.computed_styles.get('line-height')
+
+                if child_bg and child_bg not in ('transparent', 'rgba(0,0,0,0)'):
+                    # Promote the background to cell level
+                    merged_styles['background-color'] = child_bg
+
+                    # If this is a vertical centering case (height=line-height),
+                    # also promote the height to ensure proper cell height
+                    if child_height and child_line_height:
+                        try:
+                            from html2word.utils.units import UnitConverter
+                            height_pt = UnitConverter.to_pt(str(child_height))
+                            line_height_pt = UnitConverter.to_pt(str(child_line_height))
+
+                            if abs(height_pt - line_height_pt) < 2.0:
+                                # This is vertical centering, promote height too
+                                merged_styles['height'] = child_height
+                                logger.debug(f"Promoted background #{child_bg} and height {child_height} from child element to cell")
+                        except:
+                            pass
+                    else:
+                        logger.debug(f"Promoted background #{child_bg} from child element to cell")
+
         return merged_styles
 
     def _build_cell_matrix(self, rows: List[DOMNode]) -> List[List[Optional[DOMNode]]]:
@@ -1434,19 +1472,50 @@ class TableBuilder:
                 height_pt = UnitConverter.to_pt(height_str)
 
                 if height_pt > 0:
-                    # Set row height with 'atLeast' rule
-                    # This allows content to expand if needed but sets a minimum
+                    # Determine the height rule
+                    # Check if this is a vertical centering case (height == line-height)
+                    height_rule = "atLeast"  # Default: allow expansion
+
+                    # Check cells for line-height matching height (vertical centering pattern)
+                    for cell in row_node.children:
+                        if cell.tag in ('td', 'th'):
+                            # Check direct cell content or first child
+                            check_nodes = [cell]
+                            if cell.children:
+                                check_nodes.extend(cell.children[:3])  # Check first few children
+
+                            for node in check_nodes:
+                                line_height_str = node.computed_styles.get('line-height')
+                                node_height_str = node.computed_styles.get('height')
+
+                                if line_height_str and node_height_str:
+                                    try:
+                                        line_height_pt = UnitConverter.to_pt(line_height_str)
+                                        node_height_pt = UnitConverter.to_pt(node_height_str)
+
+                                        # If height and line-height are equal (within tolerance),
+                                        # this is vertical centering - use exact height
+                                        if abs(node_height_pt - line_height_pt) < 2.0:
+                                            height_rule = "exact"
+                                            logger.debug(f"Detected vertical centering pattern (height={node_height_pt}pt ≈ line-height={line_height_pt}pt), using exact rule")
+                                            break
+                                    except:
+                                        pass
+
+                            if height_rule == "exact":
+                                break
+
                     trPr = word_row._element.get_or_add_trPr()
 
                     # Remove existing height if present
                     for trHeight in trPr.findall('.//{http://schemas.openxmlformats.org/wordprocessingml/2006/main}trHeight'):
                         trPr.remove(trHeight)
 
-                    # Add new height with atLeast rule
-                    trHeight = parse_xml(f'<w:trHeight {nsdecls("w")} w:val="{int(height_pt * 20)}" w:hRule="atLeast"/>')
+                    # Add new height with determined rule
+                    trHeight = parse_xml(f'<w:trHeight {nsdecls("w")} w:val="{int(height_pt * 20)}" w:hRule="{height_rule}"/>')
                     trPr.append(trHeight)
 
-                    logger.debug(f"Applied row height: {height_pt}pt (atLeast)")
+                    logger.debug(f"Applied row height: {height_pt}pt ({height_rule})")
             except Exception as e:
                 logger.warning(f"Failed to apply row height: {e}")
 

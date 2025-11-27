@@ -152,12 +152,22 @@ class CSSSelector:
 
             if pseudo_class in ('first-child',):
                 if node.parent and node.parent.children:
-                    if node.parent.children[0] != node:
-                        return False
+                    # For LightweightNode in parallel mode, compare paths instead of objects
+                    if hasattr(node, 'path') and hasattr(node.parent.children[0], 'path'):
+                        if node.parent.children[0].path != node.path:
+                            return False
+                    else:
+                        if node.parent.children[0] != node:
+                            return False
             elif pseudo_class in ('last-child',):
                 if node.parent and node.parent.children:
-                    if node.parent.children[-1] != node:
-                        return False
+                    # For LightweightNode in parallel mode, compare paths instead of objects
+                    if hasattr(node, 'path') and hasattr(node.parent.children[-1], 'path'):
+                        if node.parent.children[-1].path != node.path:
+                            return False
+                    else:
+                        if node.parent.children[-1] != node:
+                            return False
             elif pseudo_class in ('nth-child',):
                 # Simplified nth-child support
                 formula = pseudo_match[1] if len(pseudo_match) > 1 else None

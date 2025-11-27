@@ -123,18 +123,24 @@ class BoxModel:
 
     def _calculate_border(self):
         """Calculate border properties."""
+        import logging
+        logger = logging.getLogger(__name__)
+
+        # First, parse shorthand border properties for individual sides (e.g., border-left: 1px solid #ddd)
+        self._parse_border_shorthand()
+
         # Border width for each side
         border_width = self._parse_box_property('border', 'width')
 
         # DEBUG: Log border width parsing for table cells
-        import logging
-        logger = logging.getLogger(__name__)
-        if 'border-left-width' in self.styles or 'border-width' in self.styles:
+        if 'border-left-width' in self.styles or 'border-width' in self.styles or 'border-left' in self.styles:
             logger.debug(f"BORDER DEBUG: styles keys with 'border': {[k for k in self.styles.keys() if 'border' in k]}")
             if 'border-left-width' in self.styles:
                 logger.debug(f"BORDER DEBUG: border-left-width = {self.styles['border-left-width']}")
             if 'border-width' in self.styles:
                 logger.debug(f"BORDER DEBUG: border-width = {self.styles['border-width']}")
+            if 'border-left' in self.styles:
+                logger.debug(f"BORDER DEBUG: border-left (shorthand) = {self.styles['border-left']}")
             logger.debug(f"BORDER DEBUG: parsed border_width = {border_width}")
 
         # Border style for each side
@@ -142,6 +148,9 @@ class BoxModel:
 
         # Border color for each side
         border_color = self._parse_border_colors()
+
+        # Debug final values before setting
+        logger.debug(f"BORDER FINAL VALUES: width={border_width}, style={border_style}, color={border_color}")
 
         # Set top border
         self.border.top.width = border_width['top']
@@ -162,6 +171,122 @@ class BoxModel:
         self.border.left.width = border_width['left']
         self.border.left.style = border_style['left']
         self.border.left.color = border_color['left']
+
+        # Debug final border edges
+        logger.debug(f"BORDER EDGES: left=(width={self.border.left.width}, style={self.border.left.style}, color={self.border.left.color})")
+        logger.debug(f"BORDER EDGES: right=(width={self.border.right.width}, style={self.border.right.style}, color={self.border.right.color})")
+
+    def _parse_border_shorthand(self):
+        """Parse border shorthand properties for individual sides."""
+        import logging
+        import re
+        logger = logging.getLogger(__name__)
+
+        # Check for individual side shorthand (e.g., border-left: 1px solid #ddd)
+        for side in ['top', 'right', 'bottom', 'left']:
+            shorthand_key = f'border-{side}'
+            if shorthand_key in self.styles:
+                value = self.styles[shorthand_key]
+                logger.debug(f"Parsing border shorthand: {shorthand_key} = {value}")
+
+                # Parse the shorthand value (e.g., "1px solid #ddd")
+                # Pattern matches: width (optional), style (optional), color (optional)
+                # Common patterns: "1px solid #ddd", "solid", "#ddd", "1px solid"
+                parts = str(value).strip().split()
+
+                width_val = None
+                style_val = None
+                color_val = None
+
+                for part in parts:
+                    # Check if it's a width (contains px, pt, em, etc. or is a number)
+                    if re.match(r'^\d+(\.\d+)?(px|pt|em|rem|%)?$', part) or part in ['thin', 'medium', 'thick']:
+                        width_val = part
+                    # Check if it's a style keyword
+                    elif part in ['none', 'solid', 'dashed', 'dotted', 'double', 'groove', 'ridge', 'inset', 'outset', 'hidden']:
+                        style_val = part
+                    # Otherwise assume it's a color
+                    elif (part.startswith('#') or part.startswith('rgb') or part.startswith('hsl') or
+                          part in ['transparent', 'black', 'white', 'red', 'blue', 'green', 'yellow',
+                                   'gray', 'grey', 'silver', 'maroon', 'purple', 'fuchsia', 'lime',
+                                   'olive', 'navy', 'teal', 'aqua', 'orange', 'aliceblue', 'antiquewhite',
+                                   'aquamarine', 'azure', 'beige', 'bisque', 'blanchedalmond', 'blueviolet',
+                                   'brown', 'burlywood', 'cadetblue', 'chartreuse', 'chocolate', 'coral',
+                                   'cornflowerblue', 'cornsilk', 'crimson', 'cyan', 'darkblue', 'darkcyan',
+                                   'darkgoldenrod', 'darkgray', 'darkgreen', 'darkgrey', 'darkkhaki',
+                                   'darkmagenta', 'darkolivegreen', 'darkorange', 'darkorchid', 'darkred',
+                                   'darksalmon', 'darkseagreen', 'darkslateblue', 'darkslategray',
+                                   'darkslategrey', 'darkturquoise', 'darkviolet', 'deeppink', 'deepskyblue',
+                                   'dimgray', 'dimgrey', 'dodgerblue', 'firebrick', 'floralwhite',
+                                   'forestgreen', 'gainsboro', 'ghostwhite', 'gold', 'goldenrod', 'greenyellow',
+                                   'honeydew', 'hotpink', 'indianred', 'indigo', 'ivory', 'khaki', 'lavender',
+                                   'lavenderblush', 'lawngreen', 'lemonchiffon', 'lightblue', 'lightcoral',
+                                   'lightcyan', 'lightgoldenrodyellow', 'lightgray', 'lightgreen', 'lightgrey',
+                                   'lightpink', 'lightsalmon', 'lightseagreen', 'lightskyblue', 'lightslategray',
+                                   'lightslategrey', 'lightsteelblue', 'lightyellow', 'limegreen', 'linen',
+                                   'magenta', 'mediumaquamarine', 'mediumblue', 'mediumorchid', 'mediumpurple',
+                                   'mediumseagreen', 'mediumslateblue', 'mediumspringgreen', 'mediumturquoise',
+                                   'mediumvioletred', 'midnightblue', 'mintcream', 'mistyrose', 'moccasin',
+                                   'navajowhite', 'oldlace', 'olivedrab', 'orangered', 'orchid', 'palegoldenrod',
+                                   'palegreen', 'paleturquoise', 'palevioletred', 'papayawhip', 'peachpuff',
+                                   'peru', 'pink', 'plum', 'powderblue', 'rosybrown', 'royalblue', 'saddlebrown',
+                                   'salmon', 'sandybrown', 'seagreen', 'seashell', 'sienna', 'skyblue', 'slateblue',
+                                   'slategray', 'slategrey', 'snow', 'springgreen', 'steelblue', 'tan', 'thistle',
+                                   'tomato', 'turquoise', 'violet', 'wheat', 'whitesmoke', 'yellowgreen',
+                                   # Common CSS color shortcuts
+                                   '#ccc', '#ddd', '#eee', '#aaa', '#bbb', '#fff', '#000']):
+                        color_val = part
+
+                # Apply the parsed values to individual properties
+                if width_val:
+                    self.styles[f'border-{side}-width'] = width_val
+                    logger.debug(f"Set border-{side}-width = {width_val}")
+                if style_val:
+                    self.styles[f'border-{side}-style'] = style_val
+                    logger.debug(f"Set border-{side}-style = {style_val}")
+                if color_val:
+                    self.styles[f'border-{side}-color'] = color_val
+                    logger.debug(f"Set border-{side}-color = {color_val}")
+
+                # Remove the shorthand property after expanding it
+                del self.styles[shorthand_key]
+
+        # Also handle the general border shorthand (e.g., border: 1px solid #ddd)
+        if 'border' in self.styles:
+            value = self.styles['border']
+            logger.debug(f"Parsing general border shorthand: border = {value}")
+
+            # Parse the shorthand value
+            parts = str(value).strip().split()
+
+            width_val = None
+            style_val = None
+            color_val = None
+
+            for part in parts:
+                # Check if it's a width
+                if re.match(r'^\d+(\.\d+)?(px|pt|em|rem|%)?$', part) or part in ['thin', 'medium', 'thick']:
+                    width_val = part
+                # Check if it's a style keyword
+                elif part in ['none', 'solid', 'dashed', 'dotted', 'double', 'groove', 'ridge', 'inset', 'outset', 'hidden']:
+                    style_val = part
+                # Otherwise assume it's a color
+                elif part.startswith('#') or part.startswith('rgb') or part in ['transparent', 'black', 'white', 'red', 'blue', 'green', 'yellow', 'gray', 'grey']:
+                    color_val = part
+
+            # Apply to all sides
+            if width_val and 'border-width' not in self.styles:
+                self.styles['border-width'] = width_val
+                logger.debug(f"Set border-width = {width_val}")
+            if style_val and 'border-style' not in self.styles:
+                self.styles['border-style'] = style_val
+                logger.debug(f"Set border-style = {style_val}")
+            if color_val and 'border-color' not in self.styles:
+                self.styles['border-color'] = color_val
+                logger.debug(f"Set border-color = {color_val}")
+
+            # Remove the shorthand property after expanding it
+            del self.styles['border']
 
     def _parse_border_styles(self) -> Dict[str, str]:
         """Parse border styles for each side."""
