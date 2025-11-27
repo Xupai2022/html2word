@@ -12,9 +12,16 @@ import yaml
 
 from html2word.parser.dom_tree import DOMNode, DOMTree, NodeType
 from html2word.parser.css_parser import CSSParser
-from html2word.parser.stylesheet_manager import StylesheetManager
 
-logger = logging.getLogger(__name__)
+# Try to import optimized version first, fallback to regular version
+try:
+    from html2word.parser.stylesheet_manager_optimized import StylesheetManagerOptimized as StylesheetManager
+    logger = logging.getLogger(__name__)
+    logger.info("Using optimized StylesheetManager with parallel processing support")
+except ImportError:
+    from html2word.parser.stylesheet_manager import StylesheetManager
+    logger = logging.getLogger(__name__)
+    logger.warning("StylesheetManagerOptimized not found, using standard version")
 
 
 class HTMLParser:

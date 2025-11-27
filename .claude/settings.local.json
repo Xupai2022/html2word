@@ -23,7 +23,10 @@
       "Bash(git commit:*)",
       "Bash(timeout 120 python:*)",
       "Bash(timeout 10 python:*)",
-      "Bash(timeout 30 python:*)"
+      "Bash(timeout 30 python:*)",
+      "Bash(time python -m html2word:*)",
+      "Bash(export HTML2WORD_PARALLEL=false)",
+      "Bash(awk:*)"
     ],
     "deny": [],
     "ask": []
