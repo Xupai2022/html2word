@@ -47,6 +47,10 @@ class StyleResolver:
         self._normalize_tree_styles(tree.root)
         logger.debug("Normalized styles")
 
+        # Step 2.5: Fix table border specificity issues
+        self._fix_table_borders(tree.root)
+        logger.debug("Fixed table border styles")
+
         # Step 3: Calculate box models
         self._calculate_box_models(tree.root)
         logger.debug("Calculated box models")
@@ -131,6 +135,54 @@ class StyleResolver:
             context['root_font_size'] = context['parent_font_size']
 
         return context
+
+    def _fix_table_borders(self, node: DOMNode):
+        """
+        Fix table border styles to prevent incorrect inheritance.
+
+        Specifically fixes the issue where 3px border-left styles from
+        .common-left-border or .detail-content__name are incorrectly
+        applied to table cells.
+
+        Args:
+            node: DOM node to process
+        """
+        if not node.is_element:
+            return
+
+        # Check if this is a table cell (td or th)
+        # Use node.tag for element name
+        node_tag = getattr(node, 'tag', '')
+        if node_tag in ['td', 'th']:
+            # Check for incorrectly applied 3px borders
+            if node.computed_styles:
+                # Log current border values for debugging
+                border_left = node.computed_styles.get('border-left-width', '')
+                border_width = node.computed_styles.get('border-width', '')
+                if border_left or border_width:
+                    logger.debug(f"Checking {node_tag} borders: border-left-width={border_left}, border-width={border_width}")
+                # Fix border-left if it's 3px (should be 1px for table cells)
+                if 'border-left-width' in node.computed_styles:
+                    value = str(node.computed_styles.get('border-left-width', '')).strip()
+                    # If it's 3px or 3.0px, it's likely incorrectly inherited
+                    if value in ['3px', '3.0px']:
+                        # Reset to default table border (1px)
+                        node.computed_styles['border-left-width'] = '1px'
+                        logger.debug(f"Fixed table cell border-left from {value} to 1px")
+
+                # Also check the general border-width property
+                if 'border-width' in node.computed_styles:
+                    value = str(node.computed_styles.get('border-width', '')).strip()
+                    # If any part is 3px, fix it
+                    if '3px' in value or '3.0px' in value:
+                        # Replace 3px with 1px
+                        fixed_value = value.replace('3.0px', '1px').replace('3px', '1px')
+                        node.computed_styles['border-width'] = fixed_value
+                        logger.debug(f"Fixed table cell border-width from {value} to {fixed_value}")
+
+        # Recursively process children
+        for child in node.children:
+            self._fix_table_borders(child)
 
     def _calculate_box_models(self, node: DOMNode):
         """

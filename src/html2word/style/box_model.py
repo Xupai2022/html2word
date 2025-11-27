@@ -126,6 +126,17 @@ class BoxModel:
         # Border width for each side
         border_width = self._parse_box_property('border', 'width')
 
+        # DEBUG: Log border width parsing for table cells
+        import logging
+        logger = logging.getLogger(__name__)
+        if 'border-left-width' in self.styles or 'border-width' in self.styles:
+            logger.debug(f"BORDER DEBUG: styles keys with 'border': {[k for k in self.styles.keys() if 'border' in k]}")
+            if 'border-left-width' in self.styles:
+                logger.debug(f"BORDER DEBUG: border-left-width = {self.styles['border-left-width']}")
+            if 'border-width' in self.styles:
+                logger.debug(f"BORDER DEBUG: border-width = {self.styles['border-width']}")
+            logger.debug(f"BORDER DEBUG: parsed border_width = {border_width}")
+
         # Border style for each side
         border_style = self._parse_border_styles()
 
@@ -275,16 +286,53 @@ class BoxModel:
         shorthand_prop = f'{prop_prefix}{suffix}'
         if shorthand_prop in self.styles:
             value = self.styles[shorthand_prop]
-            # Parse shorthand value
-            parts = UnitConverter.parse_box_values(value)
 
-            # Convert to pt
-            return {
-                'top': UnitConverter.to_pt(f"{parts['top']}px", self.context) if parts['top'] else 0,
-                'right': UnitConverter.to_pt(f"{parts['right']}px", self.context) if parts['right'] else 0,
-                'bottom': UnitConverter.to_pt(f"{parts['bottom']}px", self.context) if parts['bottom'] else 0,
-                'left': UnitConverter.to_pt(f"{parts['left']}px", self.context) if parts['left'] else 0,
-            }
+            # For border-width, handle keywords and preserve units
+            if prop_suffix == 'width' and prop_prefix == 'border':
+                # Split the value into parts
+                parts = str(value).strip().split()
+                if not parts:
+                    return {'top': 0, 'right': 0, 'bottom': 0, 'left': 0}
+
+                # Convert each part preserving units
+                converted = []
+                for part in parts:
+                    # Pass the complete value with units to to_pt
+                    pt_value = UnitConverter.to_pt(part, self.context)
+                    # Debug logging
+                    import logging
+                    logging.debug(f"Border width conversion: '{part}' -> {pt_value}pt")
+                    converted.append(pt_value)
+
+                # Apply CSS box model rules
+                if len(converted) == 1:
+                    return {'top': converted[0], 'right': converted[0], 'bottom': converted[0], 'left': converted[0]}
+                elif len(converted) == 2:
+                    return {'top': converted[0], 'right': converted[1], 'bottom': converted[0], 'left': converted[1]}
+                elif len(converted) == 3:
+                    return {'top': converted[0], 'right': converted[1], 'bottom': converted[2], 'left': converted[1]}
+                else:
+                    return {'top': converted[0], 'right': converted[1], 'bottom': converted[2], 'left': converted[3]}
+            else:
+                # For other properties, parse as before but preserve units
+                parts = str(value).strip().split()
+                if not parts:
+                    return {'top': 0, 'right': 0, 'bottom': 0, 'left': 0}
+
+                # Convert each part preserving units
+                converted = []
+                for part in parts:
+                    converted.append(UnitConverter.to_pt(part, self.context))
+
+                # Apply CSS box model rules
+                if len(converted) == 1:
+                    return {'top': converted[0], 'right': converted[0], 'bottom': converted[0], 'left': converted[0]}
+                elif len(converted) == 2:
+                    return {'top': converted[0], 'right': converted[1], 'bottom': converted[0], 'left': converted[1]}
+                elif len(converted) == 3:
+                    return {'top': converted[0], 'right': converted[1], 'bottom': converted[2], 'left': converted[1]}
+                else:
+                    return {'top': converted[0], 'right': converted[1], 'bottom': converted[2], 'left': converted[3]}
 
         # Try individual properties
         result = {}
@@ -292,7 +340,11 @@ class BoxModel:
             prop_name = f'{prop_prefix}-{edge}{suffix}'
             if prop_name in self.styles:
                 value = self.styles[prop_name]
-                result[edge] = UnitConverter.to_pt(value, self.context)
+                pt_value = UnitConverter.to_pt(value, self.context)
+                # Debug logging for individual properties
+                import logging
+                logging.debug(f"Individual border width '{prop_name}': '{value}' -> {pt_value}pt")
+                result[edge] = pt_value
             else:
                 result[edge] = 0.0
 

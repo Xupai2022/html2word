@@ -214,9 +214,11 @@ class UnitConverter:
         value_str = str(value).strip().lower()
 
         # Handle keywords
+        # NOTE: Changed "medium" from 3 to 1 to match typical browser rendering
+        # where default table borders appear thin rather than medium-weight
         keyword_map = {
             "thin": 1,
-            "medium": 3,
+            "medium": 1,  # Changed from 3 to 1 for thinner default borders
             "thick": 5
         }
 

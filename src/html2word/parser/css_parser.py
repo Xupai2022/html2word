@@ -178,7 +178,8 @@ class CSSParser:
                 result['border-width'] = part_lower
             # Check if it's a width with unit
             elif re.match(r'^[\d.]+[a-z]+$', part_lower):
-                result['border-width'] = part_lower
+                # Keep original value, not lowercased
+                result['border-width'] = part
             # Otherwise assume it's a color
             else:
                 result['border-color'] = part
@@ -272,6 +273,13 @@ class CSSParser:
             prop_name = f'border-{side}'
             if prop_name in styles:
                 border_parts = cls.parse_border(styles[prop_name])
+
+                # DEBUG: Log border parsing for troubleshooting
+                import logging
+                logger = logging.getLogger(__name__)
+                if 'border-width' in border_parts:
+                    logger.debug(f"CSS PARSE DEBUG: {prop_name}: {styles[prop_name]} -> border-width={border_parts['border-width']}")
+
                 if border_parts.get('border-width'):
                     expanded[f'border-{side}-width'] = border_parts['border-width']
                 if border_parts.get('border-style'):
