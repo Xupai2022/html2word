@@ -97,7 +97,7 @@ class StyleMapper:
         fmt = paragraph.paragraph_format
 
         # Text alignment
-        if 'text-align' in styles:
+        if styles and 'text-align' in styles:
             # DEBUG: Log text alignment mapping
             css_align = styles['text-align']
             alignment = self._map_text_align(css_align)
@@ -105,6 +105,11 @@ class StyleMapper:
             if alignment is not None:
                 fmt.alignment = alignment
                 logger.debug(f"ALIGNMENT DEBUG: Set paragraph alignment to {alignment}")
+        else:
+            # Default to justify alignment for better text presentation
+            # This ensures consistent formatting across all paragraphs
+            fmt.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+            logger.debug(f"ALIGNMENT DEBUG: No CSS text-align (styles={styles is not None}), using default JUSTIFY")
 
         # Line height
         # CRITICAL FIX: Word's line_spacing behaves differently than CSS line-height

@@ -592,30 +592,16 @@ class TableBuilder:
 
         box_model = cell_node.layout_info.get('box_model')
         # Table cells: limit line spacing to 1.2 for compact layout, auto-detect HTML line-height
-        # CRITICAL FIX: Override 'justify' alignment with 'left' for table cells
-        # Justified text in table cells causes poor text wrapping, especially for short lines
-        # like "IoT Device Vulnerability" which becomes spaced out unnaturally
-        # DEBUG: Log the actual text-align value
-        actual_align = para_styles.get('text-align', 'NOT SET')
-        logger.debug(f"DEBUG: text-align value in para_styles: {actual_align}")
-        logger.debug(f"DEBUG: All para_styles keys: {list(para_styles.keys())}")
+        # Convert left-aligned or default (no text-align) text to justified for better readability
+        # Most body text should be justified in documents, left alignment is typically
+        # only appropriate for headers or special elements
+        text_align = para_styles.get('text-align')
+        if text_align in ('left', 'start', None):
+            para_styles['text-align'] = 'justify'
+            logger.debug("Converted text-align from 'left' to 'justify' for better text presentation")
 
-        if para_styles.get('text-align') == 'justify':
-            para_styles['text-align'] = 'left'
-            logger.debug("Overridden justify alignment with left alignment in table cell")
-        # Apply default left alignment if no text-align is specified
-        elif 'text-align' not in para_styles:
-            para_styles['text-align'] = 'left'
-            logger.debug("Applied default left alignment to table cell")
-
+        # Apply paragraph styles
         self.style_mapper.apply_paragraph_style(paragraph, para_styles, box_model=None, max_line_spacing=1.2)
-
-        # FORCE LEFT ALIGNMENT: Explicitly set alignment again to override any default Normal style
-        # Word documents may have a Normal style with justify alignment that overrides our settings
-        if para_styles.get('text-align') != 'center' and para_styles.get('text-align') != 'right':
-            # Force left alignment for non-center and non-right aligned table cells
-            paragraph.paragraph_format.alignment = 0  # 0 = LEFT in Word
-            logger.debug("FORCED left alignment in table cell to override Normal style")
 
         # Check if we've added any content
         has_content = False
@@ -690,7 +676,7 @@ class TableBuilder:
                     has_content = True
 
 
-        # FINAL FIX: Clean up extra line breaks and force left alignment
+        # FINAL FIX: Clean up extra line breaks and force left alignment for multiline content
         # This addresses the Major Types column issues with extra line breaks
         for para in word_cell.paragraphs:
             if para.text or para.runs:  # Process all paragraphs with content
@@ -700,18 +686,19 @@ class TableBuilder:
                     if para.runs[0].text and para.runs[0].text.startswith('\n'):
                         para.runs[0].text = para.runs[0].text.lstrip('\n')
                         logger.debug("Removed leading line breaks from table cell")
-                    
+
                     # Remove trailing newlines from last run
                     if para.runs[-1].text and para.runs[-1].text.endswith('\n'):
                         para.runs[-1].text = para.runs[-1].text.rstrip('\n')
                         logger.debug("Removed trailing line breaks from table cell")
-                
-                # Force left alignment for multiline content
+
+                # Force left alignment ONLY for multiline content (contains actual line breaks)
+                # This is needed for content with <br> tags that should maintain line structure
                 if para.text.strip() and '\n' in para.text:
                     current_alignment = para.paragraph_format.alignment
                     if current_alignment not in [1, 2]:  # Not CENTER or RIGHT
                         para.paragraph_format.alignment = 0  # Force LEFT
-                        logger.debug("Forced left alignment for multiline paragraph")
+                        logger.debug("Forced left alignment for multiline paragraph with line breaks")
 
 
     def _process_cell_element_children(self, paragraph, element: DOMNode, base_styles: Dict[str, Any]):
@@ -814,6 +801,12 @@ class TableBuilder:
         if 'background-color' in merged_styles:
             del merged_styles['background-color']
 
+        # Convert left-aligned or default (no text-align) text to justified for better readability
+        # This ensures consistent two-sided justification across all content
+        text_align = merged_styles.get('text-align')
+        if text_align in ('left', 'start', None):
+            merged_styles['text-align'] = 'justify'
+
         # Apply paragraph-level styles
         # CRITICAL FIX: In table cells, do NOT apply box_model to avoid extra spacing
         # Table cells: limit line spacing to 1.2 for compact layout, auto-detect HTML line-height
@@ -855,14 +848,10 @@ class TableBuilder:
                     if 'background-color' in para_styles:
                         del para_styles['background-color']
                     # Table cells: limit line spacing to 1.2 for compact layout, auto-detect HTML line-height
-                    # CRITICAL FIX: Override 'justify' alignment with 'left' for table cells
-                    if para_styles.get('text-align') == 'justify':
-                        para_styles['text-align'] = 'left'
-                        logger.debug("Overridden justify alignment with left alignment in table cell")
-                    # Apply default left alignment if no text-align is specified
-                    elif 'text-align' not in para_styles:
-                        para_styles['text-align'] = 'left'
-                        logger.debug("Applied default left alignment to table cell")
+                    # Convert left-aligned or default (no text-align) text to justified for better readability
+                    text_align_nested = para_styles.get('text-align')
+                    if text_align_nested in ('left', 'start', None):
+                        para_styles['text-align'] = 'justify'
 
                     self.style_mapper.apply_paragraph_style(paragraph, para_styles, box_model=None, max_line_spacing=1.2)
                     # Add spacing for nested <p> tags

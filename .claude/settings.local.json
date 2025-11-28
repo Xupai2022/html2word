@@ -26,7 +26,20 @@
       "Bash(timeout 30 python:*)",
       "Bash(time python -m html2word:*)",
       "Bash(export HTML2WORD_PARALLEL=false)",
-      "Bash(awk:*)"
+      "Bash(awk:*)",
+      "Bash(export HTML2WORD_PARALLEL=true)",
+      "Bash(find:*)",
+      "Bash(timeout 20 python:*)",
+      "Bash(unzip:*)",
+      "Bash(grep:*)",
+      "Bash(git stash:*)",
+      "Bash(taskkill:*)",
+      "Bash(nul)",
+      "Bash(debug_log.txt)",
+      "Bash(timeout 5 python:*)",
+      "Bash(cat:*)",
+      "Bash(export HTML2WORD_LOG_LEVEL=DEBUG)",
+      "Bash(timeout 10 bash:*)"
     ],
     "deny": [],
     "ask": []

@@ -81,6 +81,10 @@ class RuleIndex:
         self.wildcard_rules: List[Tuple[str, Dict[str, str], Tuple[int, int, int]]] = []
         self.complex_rules: List[Tuple[str, Dict[str, str], Tuple[int, int, int]]] = []
 
+        # Selector preprocessing cache
+        self._selector_cache: Dict[str, Tuple[str, List[str], List[str]]] = {}  # selector -> (tag, classes, ids)
+        self._selector_type_cache: Dict[str, str] = {}  # selector -> type (simple/complex/wildcard)
+
         # Performance statistics
         self.stats = {
             'total_rules': 0,
@@ -91,6 +95,8 @@ class RuleIndex:
             'total_queries': 0,
             'total_candidates': 0,
             'indexed_complex': 0,  # Complex rules successfully indexed by rightmost
+            'cache_hits': 0,
+            'cache_misses': 0,
         }
 
     def build(self, rules: List[Tuple[str, Dict[str, str], Tuple[int, int, int]]]):
@@ -106,6 +112,12 @@ class RuleIndex:
 
         for rule in rules:
             selector, styles, specificity = rule
+
+            # Skip dynamic pseudo-classes that are irrelevant for HTML-to-Word conversion
+            if self._is_dynamic_pseudo(selector):
+                self.stats['skipped_rules'] += 1
+                logger.debug(f"Skipping dynamic pseudo-class rule: {selector}")
+                continue
 
             # Analyze selector type and index accordingly
             # IMPORTANT: Use the same rule object (not a new tuple) to preserve identity
@@ -133,6 +145,68 @@ class RuleIndex:
                    f"{self.stats['complex_rules']} complex, {self.stats['wildcard_rules']} wildcard "
                    f"(total: {self.stats['total_rules']})")
 
+    def _preprocess_selector(self, selector: str) -> Tuple[str, List[str], List[str]]:
+        """
+        Preprocess and cache selector components for faster lookups.
+
+        Args:
+            selector: CSS selector string
+
+        Returns:
+            Tuple of (tag, classes, ids)
+        """
+        # Check cache first
+        if selector in self._selector_cache:
+            self.stats['cache_hits'] += 1
+            return self._selector_cache[selector]
+
+        self.stats['cache_misses'] += 1
+
+        # Extract components
+        import re
+
+        # Extract tag (at the beginning)
+        tag_match = re.match(r'^([a-z][a-z0-9-]*)', selector, re.IGNORECASE)
+        tag = tag_match.group(1) if tag_match else ''
+
+        # Extract classes
+        classes = re.findall(r'\.([a-zA-Z0-9_-]+)', selector)
+
+        # Extract IDs
+        ids = re.findall(r'#([a-zA-Z0-9_-]+)', selector)
+
+        result = (tag, classes, ids)
+        self._selector_cache[selector] = result
+        return result
+
+    def _is_dynamic_pseudo(self, selector: str) -> bool:
+        """
+        Check if selector contains dynamic pseudo-classes that are irrelevant for HTML-to-Word.
+
+        These include :hover, :active, :focus etc. that only apply to interactive web pages,
+        not to static Word documents.
+
+        Args:
+            selector: CSS selector string
+
+        Returns:
+            True if selector should be skipped
+        """
+        # Dynamic pseudo-classes that don't apply to Word documents
+        dynamic_pseudos = [':hover', ':active', ':focus', ':visited', ':link', ':target',
+                          ':focus-visible', ':focus-within']
+
+        # Also skip media-specific pseudo-classes
+        media_pseudos = ['::placeholder', '::selection', '::backdrop']
+
+        all_skip_patterns = dynamic_pseudos + media_pseudos
+
+        for pattern in all_skip_patterns:
+            if pattern in selector:
+                return True
+
+        return False
+
     def _is_wildcard(self, selector: str) -> bool:
         """
         Check if selector is a wildcard that must always be checked.
@@ -146,8 +220,17 @@ class RuleIndex:
         # Universal selector
         if selector.strip() == '*':
             return True
-        # Attribute selectors (e.g., [type="text"]) - cannot be indexed
+
+        # Attribute selectors - distinguish between pure and tag-prefixed
         if '[' in selector:
+            # Check if it starts with a tag name (e.g., "input[type='text']")
+            # If it has a tag prefix, it can be indexed by that tag
+            import re
+            # Pattern: starts with tag name followed by attribute selector
+            if re.match(r'^[a-zA-Z][a-zA-Z0-9-]*\[', selector):
+                # Has tag prefix like "input[type='text']" - can be indexed by tag
+                return False
+            # Pure attribute selector like "[disabled]" - must be wildcard
             return True
 
         # Pseudo-elements (e.g., ::before, ::after) - cannot be indexed
@@ -191,17 +274,11 @@ class RuleIndex:
             selector: Simple CSS selector (e.g., "div.container#main")
             rule: The complete rule tuple
         """
-        # Extract tag name (must be at start)
-        tags = re.findall(r'^([a-z][a-z0-9]*)', selector, re.IGNORECASE)
-
-        # Extract class names (.classname)
-        classes = re.findall(r'\.([a-zA-Z0-9_-]+)', selector)
-
-        # Extract id (#idname)
-        ids = re.findall(r'#([a-zA-Z0-9_-]+)', selector)
+        # Use cached preprocessing
+        tag, classes, ids = self._preprocess_selector(selector)
 
         # Add to tag index
-        for tag in tags:
+        if tag:
             if tag not in self.tag_index:
                 self.tag_index[tag] = []
             self.tag_index[tag].append(rule)
@@ -230,6 +307,8 @@ class RuleIndex:
             selector: Complex CSS selector
             rule: The complete rule tuple
         """
+        import re
+
         # Split by combinators and get the rightmost part
         # Handle multiple selectors separated by commas
         parts = selector.split(',')
@@ -241,8 +320,20 @@ class RuleIndex:
             if components:
                 rightmost = components[-1].strip()
                 if rightmost and not self._is_wildcard(rightmost):
-                    # Index the rightmost component
+                    # Enhanced indexing: be more specific with class selectors
+                    # For "p.text123", index both under 'p' tag AND 'text123' class
+                    # This ensures better filtering when classes are very specific
                     self._index_simple_selector(rightmost, rule)
+
+                    # Additional optimization: for very specific class names (with numbers),
+                    # create a special index entry to avoid false positives
+                    specific_classes = re.findall(r'\.([a-zA-Z0-9_-]+\d+)', rightmost)
+                    for specific_class in specific_classes:
+                        # Index under the specific class name for exact matching
+                        if specific_class not in self.class_index:
+                            self.class_index[specific_class] = []
+                        if rule not in self.class_index[specific_class]:
+                            self.class_index[specific_class].append(rule)
 
     def get_candidate_rules(self, node_data: Dict[str, Any]) -> List[Tuple[str, Dict[str, str], Tuple[int, int, int]]]:
         """
@@ -335,6 +426,8 @@ class RuleIndex:
         print(f"  Simple: {self.stats['simple_rules']} ({self.stats['simple_rules']/self.stats['total_rules']*100:.1f}%)")
         print(f"  Complex: {self.stats['complex_rules']} ({self.stats['complex_rules']/self.stats['total_rules']*100:.1f}%)")
         print(f"  Wildcard: {self.stats['wildcard_rules']} ({self.stats['wildcard_rules']/self.stats['total_rules']*100:.1f}%)")
+        if self.stats['skipped_rules'] > 0:
+            print(f"  Skipped (dynamic): {self.stats['skipped_rules']}")
 
         if self.stats['total_queries'] > 0:
             avg_candidates = self.stats['total_candidates'] / self.stats['total_queries']
@@ -345,6 +438,15 @@ class RuleIndex:
             print(f"  Avg Candidates/Query: {avg_candidates:.1f}")
             print(f"  Index Efficiency: {index_efficiency:.1f}%")
             print(f"  Reduction: {self.stats['total_rules']:.0f} → {avg_candidates:.0f} rules/node")
+
+        # Cache statistics
+        if self.stats['cache_hits'] + self.stats['cache_misses'] > 0:
+            cache_hit_rate = self.stats['cache_hits'] / (self.stats['cache_hits'] + self.stats['cache_misses']) * 100
+            print("-"*60)
+            print(f"Cache Statistics:")
+            print(f"  Cache Hits: {self.stats['cache_hits']}")
+            print(f"  Cache Misses: {self.stats['cache_misses']}")
+            print(f"  Hit Rate: {cache_hit_rate:.1f}%")
         print("="*60 + "\n")
 
 

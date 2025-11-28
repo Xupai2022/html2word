@@ -54,9 +54,21 @@ class ParagraphBuilder:
         # Check if we're in a table cell (to avoid redundant white backgrounds)
         in_table_cell = getattr(self.document_builder, 'in_table_cell', False) if self.document_builder else False
 
+        # Convert left-aligned text to justified for better readability
+        # Create a copy of computed_styles if we need to modify it
+        styles = node.computed_styles
+        text_align = styles.get('text-align') if styles else None
+
+        # Convert left-aligned or default (no text-align) to justified
+        # This ensures better readability for body text
+        # Keep explicit center/right/justify alignments as-is
+        if text_align in ('left', 'start', None):
+            styles = dict(styles) if styles else {}  # Create a copy
+            styles['text-align'] = 'justify'
+
         self.style_mapper.apply_paragraph_style(
             paragraph,
-            node.computed_styles,
+            styles,
             box_model,
             prev_margin_bottom=self.last_margin_bottom,  # Pass for margin collapse
             in_table_cell=in_table_cell  # Pass table cell context

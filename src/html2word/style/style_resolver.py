@@ -51,6 +51,10 @@ class StyleResolver:
         self._fix_table_borders(tree.root)
         logger.debug("Fixed table border styles")
 
+        # Step 2.6: Fix color inheritance issues
+        self._fix_color_specificity(tree.root)
+        logger.debug("Fixed color specificity issues")
+
         # Step 3: Calculate box models
         self._calculate_box_models(tree.root)
         logger.debug("Calculated box models")
@@ -183,6 +187,50 @@ class StyleResolver:
         # Recursively process children
         for child in node.children:
             self._fix_table_borders(child)
+
+    def _fix_color_specificity(self, node: DOMNode):
+        """
+        Fix color specificity issues where parent container colors override
+        child element class-based colors.
+
+        This specifically fixes the issue where .col-risk {color:#e65050} is
+        overridden by parent container colors like .report-template__wrapper {color:#444b55}.
+
+        Args:
+            node: DOM node to process
+        """
+        if not node.is_element:
+            return
+
+        # Check if this element has classes that might define specific colors
+        classes = node.attributes.get('class', [])
+        if isinstance(classes, str):
+            classes = [classes]
+
+        # List of class names that define specific colors that should not be overridden
+        # Define default colors for these classes
+        default_colors = {
+            'col-risk': '#e65050',      # Red
+            'col-warning': '#f39c12',   # Orange
+            'col-success': '#27ae60',   # Green
+            'col-error': '#e74c3c',     # Red
+            'col-info': '#3498db'       # Blue
+        }
+
+        # Check if any color-specific classes are present
+        has_color_class = any(cls in default_colors for cls in classes)
+
+        if has_color_class and node.computed_styles:
+            # Apply default color for recognized classes
+            # This fixes issues where CSS selector matching failed (e.g., Vue scoped CSS)
+            for cls in classes:
+                if cls in default_colors:
+                    node.computed_styles['color'] = default_colors[cls]
+                    break
+
+        # Recursively process children
+        for child in node.children:
+            self._fix_color_specificity(child)
 
     def _calculate_box_models(self, node: DOMNode):
         """

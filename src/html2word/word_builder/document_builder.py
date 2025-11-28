@@ -73,6 +73,20 @@ class DocumentBuilder:
                 logger.error(f"Failed to apply headers/footers: {e}", exc_info=True)
                 # Continue even if headers/footers fail
 
+        # FINAL FIX: Ensure all table cell paragraphs have proper alignment
+        # This is a global safety net for all tables in the document
+        from docx.enum.text import WD_ALIGN_PARAGRAPH
+        for table in self.document.tables:
+            for row in table.rows:
+                for cell in row.cells:
+                    for para in cell.paragraphs:
+                        if para.text.strip():  # Only process non-empty paragraphs
+                            current_align = para.paragraph_format.alignment
+                            has_newline = '\n' in para.text
+                            # If no alignment set (None) or left-aligned (0), and no line breaks, use justify
+                            if current_align is None or (current_align == 0 and not has_newline):
+                                para.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+
         logger.info("Document built successfully")
         return self.document
 
@@ -1589,6 +1603,18 @@ class DocumentBuilder:
             # Apply spacing after table (from div's margin-bottom)
             self._apply_spacing_after_table(node)
 
+            # Special handling for chart-panel-wrap: add a clear separator
+            # This ensures the table is truly independent and not merged with adjacent tables
+            if 'chart-panel-wrap' in node.attributes.get('class', []):
+                # Add a separator paragraph with a non-breaking space to ensure separation
+                # Use minimal spacing (half line = ~6pt)
+                from docx.shared import Pt
+                separator = self.document.add_paragraph("\u00A0")  # Non-breaking space
+                separator.paragraph_format.space_before = Pt(0)
+                separator.paragraph_format.space_after = Pt(0)
+                separator.paragraph_format.line_spacing = Pt(6)  # Half line spacing (~12pt font / 2)
+                logger.info("Added minimal separator paragraph after chart-panel-wrap table to prevent merging")
+
         except Exception as e:
             logger.warning(f"Error wrapping div in table: {e}, falling back")
             self._process_children(node)
@@ -1693,14 +1719,26 @@ class DocumentBuilder:
             from html2word.style.box_model import BoxModel
             box_model = BoxModel(node)
 
+            # Special handling for chart-panel-wrap: ensure proper separation
+            classes = node.attributes.get('class', [])
+            is_chart_panel = 'chart-panel-wrap' in classes
+
             # Apply margin-bottom as space_before on a spacer paragraph
             # This represents the table's margin-bottom and will be the spacing
             # between this table and the next element
-            if box_model.margin.bottom > 0:
+            spacing = box_model.margin.bottom
+
+            # For chart panels, don't apply extra spacing here since we add a separator in _wrap_div_in_styled_table
+            # Just skip the spacing to avoid double-spacing
+            if is_chart_panel:
+                logger.debug("Skipping spacing for chart-panel-wrap (separator already added)")
+                return
+
+            if spacing > 0:
                 from docx.shared import Pt
                 spacer = self.document.add_paragraph()
-                spacer.paragraph_format.space_before = Pt(box_model.margin.bottom)
-                logger.debug(f"Applied {box_model.margin.bottom}pt spacing after table (from margin-bottom)")
+                spacer.paragraph_format.space_before = Pt(spacing)
+                logger.debug(f"Applied {spacing}pt spacing after table (from margin-bottom)")
         except Exception as e:
             logger.debug(f"Could not apply spacing after table: {e}")
 
