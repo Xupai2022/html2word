@@ -14,6 +14,7 @@ from html2word.parser.dom_tree import DOMNode, DOMTree
 from html2word.word_builder.paragraph_builder import ParagraphBuilder
 from html2word.word_builder.table_builder import TableBuilder
 from html2word.word_builder.image_builder import ImageBuilder
+from html2word.word_builder.header_footer_builder import HeaderFooterBuilder
 
 logger = logging.getLogger(__name__)
 
@@ -21,18 +22,21 @@ logger = logging.getLogger(__name__)
 class DocumentBuilder:
     """Builds complete Word documents from DOM trees."""
 
-    def __init__(self, base_path: Optional[str] = None):
+    def __init__(self, base_path: Optional[str] = None, enable_header_footer: bool = True):
         """
         Initialize document builder.
 
         Args:
             base_path: Base path for resolving relative paths
+            enable_header_footer: Whether to enable headers and footers (default: True)
         """
         self.base_path = base_path
         self.document = Document()
         self.paragraph_builder = ParagraphBuilder(self.document, document_builder=self)
         self.table_builder = TableBuilder(self.document)
         self.image_builder = ImageBuilder(self.document, base_path)
+        self.header_footer_builder = HeaderFooterBuilder(self.document, base_path)
+        self.enable_header_footer = enable_header_footer
         self.in_table_cell = False  # Track if we're processing content inside a table cell
         self.processed_nodes = set()  # Track nodes that have been processed (for el-table merging)
 
@@ -59,6 +63,15 @@ class DocumentBuilder:
         else:
             # No body found, process root
             self._process_children(tree.root)
+
+        # Apply headers and footers if enabled
+        if self.enable_header_footer:
+            try:
+                logger.info("Applying headers and footers to document")
+                self.header_footer_builder.apply_headers_footers()
+            except Exception as e:
+                logger.error(f"Failed to apply headers/footers: {e}", exc_info=True)
+                # Continue even if headers/footers fail
 
         logger.info("Document built successfully")
         return self.document
@@ -1196,6 +1209,39 @@ class DocumentBuilder:
             flex_wrap = grid_node.computed_styles.get('flex-wrap', 'nowrap')
             display = grid_node.computed_styles.get('display', '')
 
+            # Check if children are chart-panel-wrap sections that should be independent tables
+            chart_panel_children = []
+            other_children = []
+
+            for child in grid_node.children:
+                if child.is_element:
+                    if child.tag == 'section' and 'chart-panel-wrap' in child.attributes.get('class', []):
+                        chart_panel_children.append(child)
+                        logger.info(f"Found chart-panel-wrap in grid, will process as separate table")
+                    else:
+                        other_children.append(child)
+
+            # If we have chart-panel-wrap sections, process them separately
+            if chart_panel_children:
+                logger.info(f"Processing {len(chart_panel_children)} chart-panel-wrap sections as independent tables")
+
+                # Process any other content first
+                if other_children:
+                    # Process other children directly
+                    for child in other_children:
+                        self._process_node(child)
+
+                # Process each chart panel as a separate table
+                for i, chart_panel in enumerate(chart_panel_children):
+                    logger.debug(f"Processing chart-panel-wrap as independent table")
+                    self._process_node(chart_panel)
+                    # Add a paragraph separator between chart panels to ensure they are separate tables
+                    if i < len(chart_panel_children) - 1:
+                        self.document.add_paragraph()
+                        logger.debug("Added paragraph separator between chart panels")
+
+                return
+
             # FIXED: Count ALL element children (including inline like img, svg)
             child_elements = [c for c in grid_node.children if c.is_element]
 
@@ -1378,11 +1424,21 @@ class DocumentBuilder:
         try:
             logger.debug(f"Wrapping styled {node.tag} in table (classes={node.attributes.get('class', [])})")
 
-            # Check if this section contains chart-panel-header elements that need separate cells
+            # Check if this section contains chart-panel-wrap sections that should be separate tables
+            chart_panel_children = []
             header_children = []
             other_children = []
 
             for child in node.children:
+                # Check if this child is a chart-panel-wrap section (should be its own table)
+                if child.tag == 'section':
+                    classes = child.attributes.get('class', [])
+                    logger.debug(f"Checking child section with classes: {classes}")
+                    if 'chart-panel-wrap' in classes:
+                        chart_panel_children.append(child)
+                        logger.info(f"Found chart-panel-wrap section that needs separate table (classes: {classes})")
+                        continue
+
                 # Check if this child is or contains a chart-panel-header
                 is_header = False
                 if child.attributes.get('class'):
@@ -1395,6 +1451,25 @@ class DocumentBuilder:
                     header_children.append(child)
                 else:
                     other_children.append(child)
+
+            # If we have chart-panel-wrap sections, process them separately without wrapping in table
+            if chart_panel_children:
+                logger.info(f"Processing {len(chart_panel_children)} chart-panel-wrap sections as separate tables")
+
+                # Process any other content first (if any) - but skip creating a wrapper table
+                # since the chart panels should be independent
+                for child in other_children:
+                    self._process_node(child)
+
+                for child in header_children:
+                    self._process_node(child)
+
+                # Now process each chart panel as a separate table
+                for chart_panel in chart_panel_children:
+                    logger.debug(f"Processing chart-panel-wrap as separate table")
+                    self._process_node(chart_panel)
+
+                return  # Exit early since we've handled everything
 
             # Determine number of rows needed
             num_rows = 1
@@ -1968,3 +2043,39 @@ class DocumentBuilder:
         """
         self.document.save(output_path)
         logger.info(f"Document saved to: {output_path}")
+
+    def configure_header_footer(self, **kwargs):
+        """
+        Configure header and footer settings.
+
+        This method allows users to customize header/footer settings programmatically.
+
+        Args:
+            **kwargs: Configuration parameters to update
+
+        Example:
+            # Change footer text
+            builder.configure_header_footer(
+                FOOTER_LEFT_TEXT="New contact information",
+                FOOTER_FONT_SIZE=10
+            )
+
+            # Change header images
+            builder.configure_header_footer(
+                HEADER_LEFT_IMAGE="path/to/new/image.png",
+                HEADER_IMAGE_MAX_HEIGHT=1.0
+            )
+        """
+        if self.header_footer_builder:
+            self.header_footer_builder.update_config(**kwargs)
+            logger.info(f"Updated header/footer configuration with {len(kwargs)} settings")
+
+    def disable_header_footer(self):
+        """Disable header and footer for this document."""
+        self.enable_header_footer = False
+        logger.info("Headers and footers disabled")
+
+    def enable_header_footer_feature(self):
+        """Enable header and footer for this document."""
+        self.enable_header_footer = True
+        logger.info("Headers and footers enabled")
