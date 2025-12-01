@@ -606,12 +606,29 @@ class TableBuilder:
 
         box_model = cell_node.layout_info.get('box_model')
         # Table cells: limit line spacing to 1.2 for compact layout, auto-detect HTML line-height
-        # FIXED: Keep table cell content left-aligned by default for better readability
-        # Left alignment is more appropriate for tabular data
-        text_align = para_styles.get('text-align')
-        if text_align in ('left', 'start', None):
+        # FIXED: Respect Element UI alignment classes for table headers and cells
+        # Check for Element UI alignment classes first
+        cell_classes = cell_node.attributes.get('class', [])
+        if isinstance(cell_classes, str):
+            cell_classes = cell_classes.split()
+
+        # Determine alignment based on Element UI classes or existing styles
+        if 'is-center' in cell_classes:
+            para_styles['text-align'] = 'center'
+            logger.debug("Applied center alignment for Element UI 'is-center' class")
+        elif 'is-right' in cell_classes:
+            para_styles['text-align'] = 'right'
+            logger.debug("Applied right alignment for Element UI 'is-right' class")
+        elif 'is-left' in cell_classes:
             para_styles['text-align'] = 'left'
-            logger.debug("Keeping text-align as 'left' for table cell content")
+            logger.debug("Applied left alignment for Element UI 'is-left' class")
+        else:
+            # Keep table cell content left-aligned by default for better readability
+            # Left alignment is more appropriate for tabular data
+            text_align = para_styles.get('text-align')
+            if text_align in ('left', 'start', None):
+                para_styles['text-align'] = 'left'
+                logger.debug("Keeping text-align as 'left' for table cell content")
 
         # Apply paragraph styles
         self.style_mapper.apply_paragraph_style(paragraph, para_styles, box_model=None, max_line_spacing=1.2)
@@ -814,8 +831,8 @@ class TableBuilder:
         if 'background-color' in merged_styles:
             del merged_styles['background-color']
 
-        # FIXED: Keep table cell content left-aligned by default for better readability
-        # Left alignment is more appropriate for tabular data
+        # FIXED: Respect Element UI alignment classes for table headers and cells
+        # If no explicit alignment set, default to left for table cells
         text_align = merged_styles.get('text-align')
         if text_align in ('left', 'start', None):
             merged_styles['text-align'] = 'left'
