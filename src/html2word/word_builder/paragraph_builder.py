@@ -83,6 +83,12 @@ class ParagraphBuilder:
         # Process content (text and inline elements)
         self._process_content(node, paragraph)
 
+        # CRITICAL: For div.square-title elements, keep with next content to prevent pagination splits
+        # This ensures titles like "Assets Requiring Attention" stay with their tables
+        if node.tag == 'div' and 'square-title' in (node.attributes.get('class') or []):
+            paragraph.paragraph_format.keep_with_next = True
+            logger.debug(f"Set keep_with_next=True for square-title: {node.get_text_content()[:30]}...")
+
         return paragraph
 
     def _process_content(self, node: DOMNode, paragraph):
@@ -216,6 +222,11 @@ class ParagraphBuilder:
                     run.font.bold = True
                     if run.font.size:
                         run.font.size = Pt(run.font.size.pt * 1.2)
+
+            # CRITICAL: Always keep headings with next content to prevent pagination splits
+            # This ensures headings like "Assets Requiring Attention" stay attached to their tables
+            paragraph.paragraph_format.keep_with_next = True
+            logger.debug(f"Set keep_with_next=True for heading {level}: {node.get_text_content()[:30]}...")
 
         return paragraph
 
