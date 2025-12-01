@@ -1766,6 +1766,10 @@ class DocumentBuilder:
                 self._process_node_in_cell(header_child, cell, original_doc)
                 self.document = original_doc
 
+                # CRITICAL FIX: Keep header row with next row (content) to prevent pagination split
+                for paragraph in cell.paragraphs:
+                    paragraph.paragraph_format.keep_with_next = True
+
                 current_row += 1
 
             # Process other children in remaining cell(s)
