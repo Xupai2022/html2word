@@ -105,7 +105,7 @@ td:
 th:
   display: table-cell
   font-weight: bold
-  text-align: center
+  text-align: left  # FIXED: 默认左对齐，与Element UI一致
   padding: 1px
 
 # 其他
