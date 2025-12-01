@@ -39,6 +39,10 @@ class DocumentBuilder:
         self.enable_header_footer = enable_header_footer
         self.in_table_cell = False  # Track if we're processing content inside a table cell
         self.processed_nodes = set()  # Track nodes that have been processed (for el-table merging)
+        # 性能优化：缓存递归检查结果
+        self._svg_cache = {}  # node id -> bool (是否包含SVG)
+        self._bg_image_cache = {}  # node id -> bool (是否有背景图片)
+        self._el_table_pairs = {}  # header node id -> body node (el-table配对缓存)
 
     def build(self, tree: DOMTree) -> Document:
         """
@@ -56,6 +60,15 @@ class DocumentBuilder:
         from html2word.parser.html_parser import HTMLParser
         parser = HTMLParser()
         body = parser.get_body_content(tree)
+
+        root_node = body if body else tree.root
+
+        # 性能优化：启用SVG并行预处理
+        # 现在的实现已修复序列化不一致问题，可以正确命中缓存
+        self._preprocess_svg_nodes(root_node)
+
+        # 性能优化：预索引el-table配对
+        self._preindex_el_tables(root_node)
 
         if body:
             # Process body children
@@ -726,6 +739,7 @@ class DocumentBuilder:
     def _has_background_image(self, node: DOMNode) -> bool:
         """
         Check if element has a background-image that needs special handling.
+        使用缓存避免重复检查。
 
         Args:
             node: DOM node
@@ -733,23 +747,165 @@ class DocumentBuilder:
         Returns:
             True if has valid background-image
         """
-        if not node.computed_styles:
+        node_id = id(node)
+        if node_id in self._bg_image_cache:
+            return self._bg_image_cache[node_id]
+
+        result = False
+
+        if node.computed_styles:
+            bg_image = node.computed_styles.get('background-image', '')
+
+            # Fallback: check inline_styles if not in computed_styles
+            if not bg_image and hasattr(node, 'inline_styles') and node.inline_styles:
+                bg_image = node.inline_styles.get('background-image', '')
+
+            if bg_image and bg_image not in ('', 'none', 'initial', 'inherit'):
+                # Check if it's a valid image URL (data URI or external URL)
+                if 'url(' in bg_image:
+                    result = True
+
+        self._bg_image_cache[node_id] = result
+        return result
+
+    def _preprocess_svg_nodes(self, root: DOMNode):
+        """
+        Pre-process all SVG nodes and convert them to PNG in parallel.
+        Performance optimization: Batch process SVGs to enable parallel Chrome rendering.
+        """
+        # 收集所有SVG节点
+        svg_nodes = []
+
+        def collect_svg(node: DOMNode):
+            if node.is_element:
+                if node.tag == 'svg':
+                    svg_nodes.append(node)
+                for child in node.children:
+                    collect_svg(child)
+
+        collect_svg(root)
+
+        if not svg_nodes:
+            return
+
+        logger.info(f"Found {len(svg_nodes)} SVG elements, preparing batch conversion...")
+
+        # 准备批量转换数据
+        svg_list = []
+        for svg_node in svg_nodes:
+            try:
+                # 1. 获取宽高等属性 (逻辑与 ImageBuilder.build_svg 保持一致)
+                width_str = svg_node.get_attribute('width') or svg_node.computed_styles.get('width', '100')
+                height_str = svg_node.get_attribute('height') or svg_node.computed_styles.get('height', '100')
+
+                # 2. 使用 ImageBuilder 序列化 SVG (确保字符串完全一致)
+                svg_content = self.image_builder.serialize_svg_node(svg_node, width_str, height_str)
+                
+                # CRITICAL: 将序列化好的内容存回节点，供后续 ImageBuilder 使用
+                # 这保证了预处理生成的 Key 与构建时生成的 Key 100% 匹配
+                svg_node._preprocessed_svg_content = svg_content
+
+                # 3. 计算像素尺寸 (逻辑与 ImageBuilder._convert_svg_with_browser 保持一致)
+                # 先转为 pt
+                width_pt = self.image_builder._parse_dimension(width_str)
+                height_pt = self.image_builder._parse_dimension(height_str)
+                
+                # 再转为 px (96 DPI)
+                width_px = int(width_pt * 96 / 72)
+                height_px = int(height_pt * 96 / 72)
+
+                svg_list.append((svg_content, width_px, height_px))
+            except Exception as e:
+                logger.debug(f"Failed to prepare SVG for batch conversion: {e}")
+
+        if svg_list:
+            # 批量并行转换
+            # Windows上Chrome进程开销较大，并发数过高容易卡死，降低到 2 以保证稳定性
+            from html2word.utils.browser_svg_converter import get_browser_converter
+            converter = get_browser_converter()
+            # 这里生成的缓存 Key = MD5(svg_content + width_px + height_px)
+            # 后续 ImageBuilder 会使用完全相同的参数查询缓存，从而命中
+            converter.convert_batch(svg_list, max_workers=2)
+
+    def _preindex_el_tables(self, root: DOMNode):
+        """
+        预索引所有el-table的header-body配对。
+        性能优化：一次遍历构建配对映射，避免后续重复搜索。
+
+        Args:
+            root: DOM树根节点
+        """
+        headers = []
+        bodies = []
+
+        def has_class(node: DOMNode, class_name: str) -> bool:
+            if node.tag != 'table':
+                return False
+            classes = node.attributes.get('class', '')
+            if isinstance(classes, list):
+                return class_name in classes
+            elif isinstance(classes, str):
+                return class_name in classes.split()
             return False
 
-        bg_image = node.computed_styles.get('background-image', '')
+        def collect_el_tables(node: DOMNode):
+            if node.is_element:
+                if has_class(node, 'el-table__header'):
+                    headers.append(node)
+                elif has_class(node, 'el-table__body'):
+                    bodies.append(node)
+                for child in node.children:
+                    collect_el_tables(child)
 
-        # Fallback: check inline_styles if not in computed_styles
-        if not bg_image and hasattr(node, 'inline_styles') and node.inline_styles:
-            bg_image = node.inline_styles.get('background-image', '')
+        collect_el_tables(root)
 
-        if not bg_image or bg_image in ('', 'none', 'initial', 'inherit'):
-            return False
+        if not headers:
+            return
 
-        # Check if it's a valid image URL (data URI or external URL)
-        if 'url(' in bg_image:
-            return True
+        logger.info(f"Found {len(headers)} el-table headers, {len(bodies)} bodies, building index...")
 
-        return False
+        # 按DOM顺序配对（header后面最近的body）
+        used_bodies = set()
+        for header in headers:
+            # 找到header在DOM中的位置后最近的未使用的body
+            for body in bodies:
+                if id(body) in used_bodies:
+                    continue
+                # 简单配对：假设body紧跟header后面
+                self._el_table_pairs[id(header)] = body
+                used_bodies.add(id(body))
+                break
+
+        logger.info(f"Indexed {len(self._el_table_pairs)} el-table pairs")
+
+    def _parse_dimension_to_px(self, value: str) -> int:
+        """解析尺寸值为像素"""
+        import re
+        if not value:
+            return 100
+
+        value = str(value).strip().lower()
+
+        # 纯数字
+        if value.isdigit():
+            return int(value)
+
+        # 带单位
+        match = re.match(r'^([\d.]+)(px|pt|em|rem|%)?$', value)
+        if match:
+            num = float(match.group(1))
+            unit = match.group(2) or 'px'
+
+            if unit == 'px':
+                return int(num)
+            elif unit == 'pt':
+                return int(num * 1.333)  # pt to px
+            elif unit in ('em', 'rem'):
+                return int(num * 16)  # assume 16px base
+            elif unit == '%':
+                return int(num * 6)  # rough estimate
+
+        return 100  # default
 
     def _serialize_element_to_html(self, node: DOMNode) -> str:
         """
@@ -1830,6 +1986,7 @@ class DocumentBuilder:
     def _contains_svg(self, node: DOMNode) -> bool:
         """
         Recursively check if a node contains SVG elements.
+        使用缓存避免重复遍历。
 
         Args:
             node: DOM node to check
@@ -1837,13 +1994,22 @@ class DocumentBuilder:
         Returns:
             True if node or any descendants contain SVG
         """
+        node_id = id(node)
+        if node_id in self._svg_cache:
+            return self._svg_cache[node_id]
+
+        result = False
         for child in node.children:
             if child.is_element:
                 if child.tag == 'svg':
-                    return True
+                    result = True
+                    break
                 if self._contains_svg(child):
-                    return True
-        return False
+                    result = True
+                    break
+
+        self._svg_cache[node_id] = result
+        return result
 
     def _is_root_layout_container(self, node: DOMNode) -> bool:
         """
@@ -1970,6 +2136,12 @@ class DocumentBuilder:
         Returns:
             The el-table__body node if found, None otherwise
         """
+        # 性能优化：先检查预索引缓存
+        cached = self._el_table_pairs.get(id(header_node))
+        if cached is not None:
+            logger.debug("Using cached el-table pair")
+            return cached
+
         if not header_node.parent:
             logger.debug("Header node has no parent, cannot find body")
             return None

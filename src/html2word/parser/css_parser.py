@@ -18,6 +18,29 @@ class CSSParser:
     # CSS property name pattern
     PROPERTY_PATTERN = re.compile(r'^[a-z-]+$')
 
+    # 静态文档中无用的伪类/伪元素选择器 (这些不会在Word转换中生效)
+    SKIP_PSEUDO_SELECTORS = frozenset([
+        # 伪元素
+        '::before', '::after', ':before', ':after',
+        '::placeholder', '::selection', '::backdrop',
+        '::first-line', '::first-letter', '::marker',
+        # 用户交互伪类
+        ':hover', ':focus', ':active', ':visited', ':link',
+        ':focus-visible', ':focus-within', ':target',
+        # 表单状态伪类
+        ':enabled', ':disabled', ':checked', ':indeterminate',
+        ':valid', ':invalid', ':required', ':optional',
+        ':read-only', ':read-write', ':placeholder-shown',
+        # 其他动态伪类
+        ':fullscreen', ':modal', ':picture-in-picture',
+    ])
+
+    @classmethod
+    def _should_skip_selector(cls, selector: str) -> bool:
+        """检查选择器是否应该跳过 (静态文档中无用的伪类/伪元素)"""
+        selector_lower = selector.lower()
+        return any(pseudo in selector_lower for pseudo in cls.SKIP_PSEUDO_SELECTORS)
+
     @classmethod
     def parse_inline_style(cls, style_string: str) -> Dict[str, str]:
         """
@@ -434,10 +457,7 @@ class CSSParser:
                     selector = cls._serialize_value(selector_tokens).strip()
 
                     # Skip pseudo-element selectors that don't affect Word conversion
-                    # These include ::before, ::after, :hover, :focus, etc.
-                    if any(pseudo in selector for pseudo in ['::before', '::after', ':before', ':after',
-                                                              ':hover', ':focus', ':active', ':visited',
-                                                              ':link', ':enabled', ':disabled']):
+                    if cls._should_skip_selector(selector):
                         continue
 
                     # Extract declarations
@@ -511,9 +531,7 @@ class CSSParser:
             declarations = match.group(2).strip()
 
             # Skip pseudo-element selectors
-            if any(pseudo in selector for pseudo in ['::before', '::after', ':before', ':after',
-                                                      ':hover', ':focus', ':active', ':visited',
-                                                      ':link', ':enabled', ':disabled']):
+            if cls._should_skip_selector(selector):
                 continue
 
             # Parse declarations

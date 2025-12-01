@@ -9,8 +9,10 @@ import tempfile
 import time
 import subprocess
 import os
+import hashlib
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List, Tuple, Dict
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +25,82 @@ class BrowserSVGConverter:
 
     def __init__(self):
         self.driver = None
+        # SVG转换结果缓存 (svg_hash -> png_bytes)
+        self._svg_cache: Dict[str, bytes] = {}
+
+    def _get_svg_hash(self, svg_content: str, width: int, height: int) -> str:
+        """生成SVG内容的唯一标识"""
+        key = f"{svg_content}_{width}_{height}"
+        return hashlib.md5(key.encode()).hexdigest()
+
+    def convert_batch(self, svg_list: List[Tuple[str, int, int]], max_workers: int = 4) -> Dict[str, bytes]:
+        """
+        批量并行转换多个SVG为PNG
+
+        Args:
+            svg_list: [(svg_content, width, height), ...] 列表
+            max_workers: 最大并行工作线程数
+
+        Returns:
+            {svg_hash: png_bytes} 字典
+        """
+        if not svg_list:
+            return {}
+
+        # 过滤已缓存的SVG
+        to_convert = []
+        for svg_content, width, height in svg_list:
+            svg_hash = self._get_svg_hash(svg_content, width, height)
+            if svg_hash not in self._svg_cache:
+                to_convert.append((svg_hash, svg_content, width, height))
+
+        if not to_convert:
+            logger.info(f"All {len(svg_list)} SVGs already cached")
+            return self._svg_cache
+
+        logger.info(f"Batch converting {len(to_convert)} SVGs with {max_workers} workers...")
+        start_time = time.time()
+        completed_count = 0
+
+        def convert_single(args):
+            svg_hash, svg_content, width, height = args
+            png_data = self._convert_with_chrome_subprocess(svg_content, width, height)
+            return svg_hash, png_data
+
+        # 使用线程池并行转换，设置总体超时
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {executor.submit(convert_single, item): item for item in to_convert}
+
+            # 使用带超时的迭代，每个future最多等待15秒
+            try:
+                for future in as_completed(futures, timeout=120):  # 总体超时120秒
+                    try:
+                        svg_hash, png_data = future.result(timeout=15)
+                        completed_count += 1
+                        if png_data:
+                            self._svg_cache[svg_hash] = png_data
+                        # 进度日志
+                        if completed_count % 5 == 0:
+                            logger.info(f"SVG batch progress: {completed_count}/{len(to_convert)}")
+                    except Exception as e:
+                        completed_count += 1
+                        logger.warning(f"SVG conversion failed: {e}")
+            except TimeoutError:
+                logger.warning(f"SVG batch conversion timeout after 120s, {completed_count}/{len(to_convert)} completed")
+                # 取消剩余的futures
+                for future in futures:
+                    future.cancel()
+
+        elapsed = time.time() - start_time
+        success_count = sum(1 for h, _, _, _ in to_convert if h in self._svg_cache)
+        logger.info(f"Batch converted {success_count}/{len(to_convert)} SVGs in {elapsed:.2f}s")
+
+        return self._svg_cache
+
+    def get_cached(self, svg_content: str, width: int, height: int) -> Optional[bytes]:
+        """从缓存获取已转换的PNG"""
+        svg_hash = self._get_svg_hash(svg_content, width, height)
+        return self._svg_cache.get(svg_hash)
 
     def convert(self, svg_content: str, width: int, height: int) -> Optional[bytes]:
         """
@@ -36,9 +114,18 @@ class BrowserSVGConverter:
         Returns:
             PNG图片数据（bytes）或None
         """
+        # 先检查缓存
+        cached = self.get_cached(svg_content, width, height)
+        if cached:
+            logger.debug(f"SVG cache hit for {width}x{height}")
+            return cached
+
         # 优先使用subprocess方法（不需要Selenium）
         result = self._convert_with_chrome_subprocess(svg_content, width, height)
         if result:
+            # 存入缓存
+            svg_hash = self._get_svg_hash(svg_content, width, height)
+            self._svg_cache[svg_hash] = result
             return result
 
         # 回退到Selenium方法
@@ -180,6 +267,18 @@ class BrowserSVGConverter:
                 logger.debug("Chrome executable not found")
                 return None
 
+            # 处理极小尺寸：Chrome对于极小窗口(如1x1)可能无法正确渲染或挂起
+            # 如果尺寸小于16px，强制使用16px窗口，渲染后裁剪
+            min_size = 16
+            use_cropping = False
+            target_width, target_height = width, height
+            
+            if width < min_size or height < min_size:
+                use_cropping = True
+                target_width = max(width, min_size)
+                target_height = max(height, min_size)
+                logger.debug(f"SVG size too small ({width}x{height}), scaling window to {target_width}x{target_height} and cropping")
+
             # 创建HTML文件
             html_content = f"""<!DOCTYPE html>
 <html>
@@ -188,8 +287,8 @@ class BrowserSVGConverter:
     <style>
         * {{ margin: 0; padding: 0; box-sizing: border-box; }}
         html, body {{
-            width: {width}px;
-            height: {height}px;
+            width: {target_width}px;
+            height: {target_height}px;
             margin: 0;
             padding: 0;
             overflow: hidden;
@@ -197,6 +296,7 @@ class BrowserSVGConverter:
         }}
         svg {{
             display: block;
+            /* 强制SVG保持原始请求尺寸，不随窗口放大 */
             width: {width}px !important;
             height: {height}px !important;
         }}
@@ -224,22 +324,56 @@ class BrowserSVGConverter:
                     '--no-sandbox',
                     '--hide-scrollbars',  # 隐藏滚动条
                     '--force-device-scale-factor=1',  # 确保1:1像素比例
-                    f'--window-size={width},{height}',
+                    f'--window-size={target_width},{target_height}',
                     f'--screenshot={png_file}',
                     html_file
                 ]
 
+                logger.debug(f"Running Chrome subprocess for {width}x{height} (window: {target_width}x{target_height})")
+
                 # 运行Chrome
-                result = subprocess.run(cmd, capture_output=True, timeout=10, creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
+                # 增加超时处理的健壮性，捕获所有可能的异常
+                try:
+                    result = subprocess.run(
+                        cmd, 
+                        capture_output=True, 
+                        timeout=15,  # 稍微放宽单次超时
+                        creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
+                    )
+                except subprocess.TimeoutExpired:
+                    logger.warning(f"Chrome subprocess timed out for SVG ({width}x{height})")
+                    return None
 
                 # 读取PNG文件
                 if os.path.exists(png_file):
-                    with open(png_file, 'rb') as f:
-                        png_data = f.read()
+                    # 如果使用了裁剪，使用PIL裁剪图片
+                    if use_cropping:
+                        try:
+                            from PIL import Image
+                            with Image.open(png_file) as img:
+                                # 裁剪回原始尺寸 (0, 0, width, height)
+                                cropped = img.crop((0, 0, width, height))
+                                output = io.BytesIO()
+                                cropped.save(output, format='PNG')
+                                png_data = output.getvalue()
+                                logger.debug(f"Cropped PNG from {target_width}x{target_height} to {width}x{height}")
+                        except ImportError:
+                            logger.warning("PIL not installed, returning uncropped image")
+                            with open(png_file, 'rb') as f:
+                                png_data = f.read()
+                        except Exception as e:
+                            logger.warning(f"Failed to crop image: {e}")
+                            # 回退到直接读取（可能带白边）
+                            with open(png_file, 'rb') as f:
+                                png_data = f.read()
+                    else:
+                        with open(png_file, 'rb') as f:
+                            png_data = f.read()
+                            
                     logger.info(f"Chrome subprocess: Successfully converted SVG to PNG ({width}x{height})")
                     return png_data
                 else:
-                    logger.debug(f"Chrome subprocess: PNG file not created")
+                    logger.debug(f"Chrome subprocess: PNG file not created. Stderr: {result.stderr.decode('utf-8', errors='ignore') if result else 'None'}")
                     return None
 
             finally:
@@ -254,9 +388,6 @@ class BrowserSVGConverter:
                 except:
                     pass
 
-        except subprocess.TimeoutExpired:
-            logger.debug("Chrome subprocess timeout")
-            return None
         except Exception as e:
             logger.debug(f"Chrome subprocess failed: {e}")
             return None

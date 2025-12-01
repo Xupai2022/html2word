@@ -15,6 +15,21 @@ logger = logging.getLogger(__name__)
 class CSSSelector:
     """CSS selector matcher with specificity calculation."""
 
+    # 预编译正则表达式 (类级别，只编译一次)
+    _TAG_PATTERN = re.compile(r'^([a-zA-Z0-9-]*)')
+    _ID_PATTERN = re.compile(r'#([a-zA-Z0-9_-]+)')
+    _CLASS_PATTERN = re.compile(r'\.([a-zA-Z0-9_-]+)')
+    _ATTR_PATTERN = re.compile(r'\[([a-zA-Z0-9_-]+)(?:([~|^$*]?=)["\']?([^"\'\]]+)["\']?)?\]')
+    _PSEUDO_PATTERN = re.compile(r':([a-zA-Z0-9_-]+)(?:\(([^)]+)\))?')
+
+    # 用于specificity计算的正则
+    _SPECIFICITY_ID_PATTERN = re.compile(r'#[a-zA-Z0-9_-]+')
+    _SPECIFICITY_CLASS_PATTERN = re.compile(r'\.[a-zA-Z0-9_-]+')
+    _SPECIFICITY_ATTR_PATTERN = re.compile(r'\[[^\]]+\]')
+    _SPECIFICITY_PSEUDO_PATTERN = re.compile(r':[a-zA-Z0-9_-]+(?:\([^)]+\))?')
+    _SPECIFICITY_TAG_PATTERN = re.compile(r'\b[a-zA-Z][a-zA-Z0-9-]*\b')
+    _COMBINATOR_PATTERN = re.compile(r'\s*[>+~]\s*')
+
     @classmethod
     def matches(cls, selector: str, node: DOMNode) -> bool:
         """
@@ -79,30 +94,25 @@ class CSSSelector:
         if selector == '*':
             return True
 
-        # Parse selector into components
+        # Parse selector into components using pre-compiled patterns
         # Format: tag#id.class1.class2[attr=value]:pseudo
-        tag_pattern = r'^([a-zA-Z0-9-]*)'
-        id_pattern = r'#([a-zA-Z0-9_-]+)'
-        class_pattern = r'\.([a-zA-Z0-9_-]+)'
-        attr_pattern = r'\[([a-zA-Z0-9_-]+)(?:([~|^$*]?=)["\']?([^"\'\]]+)["\']?)?\]'
-        pseudo_pattern = r':([a-zA-Z0-9_-]+)(?:\(([^)]+)\))?'
 
         # Extract tag
-        tag_match = re.match(tag_pattern, selector)
+        tag_match = cls._TAG_PATTERN.match(selector)
         if tag_match:
             required_tag = tag_match.group(1)
             if required_tag and node.tag != required_tag:
                 return False
 
         # Extract and check ID
-        id_matches = re.findall(id_pattern, selector)
+        id_matches = cls._ID_PATTERN.findall(selector)
         if id_matches:
             node_id = node.attributes.get('id', '')
             if node_id not in id_matches:
                 return False
 
         # Extract and check classes
-        class_matches = re.findall(class_pattern, selector)
+        class_matches = cls._CLASS_PATTERN.findall(selector)
         if class_matches:
             node_classes = node.attributes.get('class', '')
             if isinstance(node_classes, list):
@@ -114,7 +124,7 @@ class CSSSelector:
                     return False
 
         # Extract and check attributes
-        attr_matches = re.findall(attr_pattern, selector)
+        attr_matches = cls._ATTR_PATTERN.findall(selector)
         for attr_match in attr_matches:
             attr_name = attr_match[0]
             operator = attr_match[1] if len(attr_match) > 1 else None
@@ -146,7 +156,7 @@ class CSSSelector:
                         return False
 
         # Handle pseudo-classes (simplified support)
-        pseudo_matches = re.findall(pseudo_pattern, selector)
+        pseudo_matches = cls._PSEUDO_PATTERN.findall(selector)
         for pseudo_match in pseudo_matches:
             pseudo_class = pseudo_match[0]
 
@@ -351,23 +361,23 @@ class CSSSelector:
 
         # For complex selectors, calculate based on all components
         # Remove combinators but keep the components
-        selector_clean = re.sub(r'\s*[>+~]\s*', ' ', selector)
+        selector_clean = cls._COMBINATOR_PATTERN.sub(' ', selector)
 
-        id_count = len(re.findall(r'#[a-zA-Z0-9_-]+', selector_clean))
-        class_count = len(re.findall(r'\.[a-zA-Z0-9_-]+', selector_clean))
-        attr_count = len(re.findall(r'\[[^\]]+\]', selector_clean))
-        pseudo_class_count = len(re.findall(r':[a-zA-Z0-9_-]+(?:\([^)]+\))?', selector_clean))
+        id_count = len(cls._SPECIFICITY_ID_PATTERN.findall(selector_clean))
+        class_count = len(cls._SPECIFICITY_CLASS_PATTERN.findall(selector_clean))
+        attr_count = len(cls._SPECIFICITY_ATTR_PATTERN.findall(selector_clean))
+        pseudo_class_count = len(cls._SPECIFICITY_PSEUDO_PATTERN.findall(selector_clean))
 
         # Count type selectors (tags)
         # Remove IDs, classes, attributes, and pseudo-classes first
         tag_selector = selector_clean
-        tag_selector = re.sub(r'#[a-zA-Z0-9_-]+', '', tag_selector)
-        tag_selector = re.sub(r'\.[a-zA-Z0-9_-]+', '', tag_selector)
-        tag_selector = re.sub(r'\[[^\]]+\]', '', tag_selector)
-        tag_selector = re.sub(r':[a-zA-Z0-9_-]+(?:\([^)]+\))?', '', tag_selector)
+        tag_selector = cls._SPECIFICITY_ID_PATTERN.sub('', tag_selector)
+        tag_selector = cls._SPECIFICITY_CLASS_PATTERN.sub('', tag_selector)
+        tag_selector = cls._SPECIFICITY_ATTR_PATTERN.sub('', tag_selector)
+        tag_selector = cls._SPECIFICITY_PSEUDO_PATTERN.sub('', tag_selector)
 
         # Count remaining tag names
-        tags = re.findall(r'\b[a-zA-Z][a-zA-Z0-9-]*\b', tag_selector)
+        tags = cls._SPECIFICITY_TAG_PATTERN.findall(tag_selector)
         tag_count = len(tags)
 
         # b = class + attribute + pseudo-class

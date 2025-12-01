@@ -310,8 +310,13 @@ class ImageBuilder:
             python-docx InlineShape object or None
         """
         try:
-            # Get SVG content by serializing the node
-            svg_content = self._serialize_svg_node(svg_node, width, height)
+            # Get SVG content: use preprocessed content if available (ensures cache consistency)
+            if hasattr(svg_node, '_preprocessed_svg_content'):
+                svg_content = svg_node._preprocessed_svg_content
+                logger.debug("Using preprocessed SVG content")
+            else:
+                # Serialize the node
+                svg_content = self.serialize_svg_node(svg_node, width, height)
 
             if not svg_content:
                 logger.warning("Empty SVG content")
@@ -502,7 +507,7 @@ class ImageBuilder:
             logger.error(f"Failed to insert SVG image: {e}")
             return None
 
-    def _serialize_svg_node(self, svg_node: DOMNode, width: str, height: str) -> str:
+    def serialize_svg_node(self, svg_node: DOMNode, width: str, height: str) -> str:
         """
         Serialize SVG DOM node to SVG string.
 
