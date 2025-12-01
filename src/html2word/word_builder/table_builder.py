@@ -606,13 +606,12 @@ class TableBuilder:
 
         box_model = cell_node.layout_info.get('box_model')
         # Table cells: limit line spacing to 1.2 for compact layout, auto-detect HTML line-height
-        # Convert left-aligned or default (no text-align) text to justified for better readability
-        # Most body text should be justified in documents, left alignment is typically
-        # only appropriate for headers or special elements
+        # FIXED: Keep table cell content left-aligned by default for better readability
+        # Left alignment is more appropriate for tabular data
         text_align = para_styles.get('text-align')
         if text_align in ('left', 'start', None):
-            para_styles['text-align'] = 'justify'
-            logger.debug("Converted text-align from 'left' to 'justify' for better text presentation")
+            para_styles['text-align'] = 'left'
+            logger.debug("Keeping text-align as 'left' for table cell content")
 
         # Apply paragraph styles
         self.style_mapper.apply_paragraph_style(paragraph, para_styles, box_model=None, max_line_spacing=1.2)
@@ -815,11 +814,11 @@ class TableBuilder:
         if 'background-color' in merged_styles:
             del merged_styles['background-color']
 
-        # Convert left-aligned or default (no text-align) text to justified for better readability
-        # This ensures consistent two-sided justification across all content
+        # FIXED: Keep table cell content left-aligned by default for better readability
+        # Left alignment is more appropriate for tabular data
         text_align = merged_styles.get('text-align')
         if text_align in ('left', 'start', None):
-            merged_styles['text-align'] = 'justify'
+            merged_styles['text-align'] = 'left'
 
         # Apply paragraph-level styles
         # CRITICAL FIX: In table cells, do NOT apply box_model to avoid extra spacing
@@ -861,11 +860,11 @@ class TableBuilder:
                     para_styles = merged_styles.copy()
                     if 'background-color' in para_styles:
                         del para_styles['background-color']
-                    # Table cells: limit line spacing to 1.2 for compact layout, auto-detect HTML line-height
-                    # Convert left-aligned or default (no text-align) text to justified for better readability
+                    # FIXED: Keep table cell content left-aligned by default for better readability
+                    # Left alignment is more appropriate for tabular data
                     text_align_nested = para_styles.get('text-align')
                     if text_align_nested in ('left', 'start', None):
-                        para_styles['text-align'] = 'justify'
+                        para_styles['text-align'] = 'left'
 
                     self.style_mapper.apply_paragraph_style(paragraph, para_styles, box_model=None, max_line_spacing=1.2)
                     # Add spacing for nested <p> tags

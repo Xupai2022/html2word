@@ -86,7 +86,7 @@ class DocumentBuilder:
                 logger.error(f"Failed to apply headers/footers: {e}", exc_info=True)
                 # Continue even if headers/footers fail
 
-        # FINAL FIX: Ensure all table cell paragraphs have proper alignment
+        # FIXED: Keep table cell content left-aligned by default for better readability
         # This is a global safety net for all tables in the document
         from docx.enum.text import WD_ALIGN_PARAGRAPH
         for table in self.document.tables:
@@ -95,10 +95,10 @@ class DocumentBuilder:
                     for para in cell.paragraphs:
                         if para.text.strip():  # Only process non-empty paragraphs
                             current_align = para.paragraph_format.alignment
-                            has_newline = '\n' in para.text
-                            # If no alignment set (None) or left-aligned (0), and no line breaks, use justify
-                            if current_align is None or (current_align == 0 and not has_newline):
-                                para.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+                            # FIXED: Keep left alignment (0) for table cells, don't convert to justify
+                            # Left alignment is more appropriate for tabular data
+                            if current_align is None:
+                                para.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.LEFT
 
         logger.info("Document built successfully")
         return self.document
