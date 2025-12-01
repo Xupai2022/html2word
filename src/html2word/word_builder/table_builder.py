@@ -274,6 +274,20 @@ class TableBuilder:
             # Set row height based on CSS height property
             self._apply_row_height(word_row, row_node)
 
+            # Set row to not split across pages
+            self._set_row_cant_split(word_row)
+
+            # Check if this is a header row
+            is_header = False
+            if row_node.parent and row_node.parent.tag == 'thead':
+                is_header = True
+            elif any(c.tag == 'th' for c in row_node.children if c.is_element):
+                is_header = True
+            
+            if is_header:
+                self._set_row_as_header(word_row)
+                self._set_row_keep_with_next(word_row)
+
             col_idx = 0
 
             # Get cells for this row
@@ -1526,3 +1540,69 @@ class TableBuilder:
             return UnitConverter.to_pt(str(font_size))
         except:
             return 10.5  # Default: 14px = 10.5pt (common for Chinese documents)
+
+    def _set_row_cant_split(self, row):
+        """
+        Set row property to prevent splitting across pages.
+
+        Args:
+            row: python-docx Row object
+        """
+        try:
+            from docx.oxml.shared import OxmlElement
+            from docx.oxml.ns import qn
+
+            tr = row._tr
+            trPr = tr.get_or_add_trPr()
+            
+            # Check if cantSplit element already exists
+            cantSplit = trPr.find(qn('w:cantSplit'))
+            if cantSplit is None:
+                cantSplit = OxmlElement('w:cantSplit')
+                trPr.append(cantSplit)
+                
+            logger.debug("Set row cantSplit property")
+        except Exception as e:
+            logger.warning(f"Failed to set row cantSplit property: {e}")
+
+    def _set_row_as_header(self, row):
+        """
+        Set row as header row (repeats at the top of each page).
+
+        Args:
+            row: python-docx Row object
+        """
+        try:
+            from docx.oxml.shared import OxmlElement
+            from docx.oxml.ns import qn
+
+            tr = row._tr
+            trPr = tr.get_or_add_trPr()
+            
+            # Check if tblHeader element already exists
+            tblHeader = trPr.find(qn('w:tblHeader'))
+            if tblHeader is None:
+                tblHeader = OxmlElement('w:tblHeader')
+                tblHeader.set(qn('w:val'), 'true')
+                trPr.append(tblHeader)
+            
+            logger.debug("Set row as header")
+        except Exception as e:
+            logger.warning(f"Failed to set row as header: {e}")
+
+    def _set_row_keep_with_next(self, row):
+        """
+        Set keep_with_next=True for all paragraphs in the row.
+        This ensures the row sticks to the next row (preventing pagination split).
+
+        Args:
+            row: python-docx Row object
+        """
+        try:
+            for cell in row.cells:
+                for paragraph in cell.paragraphs:
+                    paragraph.paragraph_format.keep_with_next = True
+            
+            logger.debug("Set row keep_with_next property")
+        except Exception as e:
+            logger.warning(f"Failed to set row keep_with_next: {e}")
