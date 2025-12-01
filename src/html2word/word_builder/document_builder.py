@@ -831,15 +831,16 @@ class DocumentBuilder:
         """
         预索引所有el-table的header-body配对。
         性能优化：一次遍历构建配对映射，避免后续重复搜索。
+        改进：使用结构化搜索代替全局列表匹配，确保配对的准确性。
 
         Args:
             root: DOM树根节点
         """
+        self._el_table_pairs = {}
         headers = []
-        bodies = []
 
         def has_class(node: DOMNode, class_name: str) -> bool:
-            if node.tag != 'table':
+            if not node.is_element:
                 return False
             classes = node.attributes.get('class', '')
             if isinstance(classes, list):
@@ -848,35 +849,70 @@ class DocumentBuilder:
                 return class_name in classes.split()
             return False
 
-        def collect_el_tables(node: DOMNode):
+        # 1. 收集所有 header
+        def collect_headers(node: DOMNode):
             if node.is_element:
-                if has_class(node, 'el-table__header'):
+                if node.tag == 'table' and has_class(node, 'el-table__header'):
                     headers.append(node)
-                elif has_class(node, 'el-table__body'):
-                    bodies.append(node)
                 for child in node.children:
-                    collect_el_tables(child)
+                    collect_headers(child)
 
-        collect_el_tables(root)
+        collect_headers(root)
 
         if not headers:
             return
 
-        logger.info(f"Found {len(headers)} el-table headers, {len(bodies)} bodies, building index...")
+        logger.info(f"Found {len(headers)} el-table headers, building index...")
 
-        # 按DOM顺序配对（header后面最近的body）
-        used_bodies = set()
+        count = 0
         for header in headers:
-            # 找到header在DOM中的位置后最近的未使用的body
-            for body in bodies:
-                if id(body) in used_bodies:
+            # 模仿 _find_el_table_body 的逻辑进行结构化搜索
+            # Header -> Parent (Wrapper) -> Grandparent (Container) -> Body Wrapper -> Body
+            
+            if not header.parent or not header.parent.parent:
+                continue
+                
+            parent = header.parent
+            grandparent = parent.parent
+            
+            # 在 Grandparent 的子节点中寻找 Body Wrapper
+            target_body = None
+            
+            # 优化：只在 parent 之后的兄弟节点中寻找，因为 Body 肯定在 Header 后面
+            try:
+                if parent in grandparent.children:
+                    start_idx = grandparent.children.index(parent) + 1
+                else:
                     continue
-                # 简单配对：假设body紧跟header后面
-                self._el_table_pairs[id(header)] = body
-                used_bodies.add(id(body))
-                break
-
-        logger.info(f"Indexed {len(self._el_table_pairs)} el-table pairs")
+            except ValueError:
+                continue
+                
+            for i in range(start_idx, len(grandparent.children)):
+                sibling = grandparent.children[i]
+                
+                # Case 1: Sibling IS the body table (rare)
+                if sibling.tag == 'table' and has_class(sibling, 'el-table__body'):
+                    target_body = sibling
+                    break
+                
+                # Case 2: Sibling IS the body wrapper (common)
+                # 检查 sibling 的 children 中是否有 el-table__body
+                if sibling.is_element:
+                    found_in_sibling = None
+                    for child in sibling.children:
+                        if child.tag == 'table' and has_class(child, 'el-table__body'):
+                            found_in_sibling = child
+                            break
+                    
+                    if found_in_sibling:
+                        target_body = found_in_sibling
+                        break
+            
+            if target_body:
+                self._el_table_pairs[id(header)] = target_body
+                count += 1
+        
+        logger.info(f"Indexed {count} el-table pairs")
 
     def _parse_dimension_to_px(self, value: str) -> int:
         """解析尺寸值为像素"""
