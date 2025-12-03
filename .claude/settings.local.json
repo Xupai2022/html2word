@@ -41,7 +41,10 @@
       "Bash(export HTML2WORD_LOG_LEVEL=DEBUG)",
       "Bash(timeout 10 bash:*)",
       "Bash(tasklist:*)",
-      "Bash(findstr:*)"
+      "Bash(findstr:*)",
+      "Bash(tr:*)",
+      "Bash(xargs ls:*)",
+      "Bash(timeout 180 python:*)"
     ],
     "deny": [],
     "ask": []

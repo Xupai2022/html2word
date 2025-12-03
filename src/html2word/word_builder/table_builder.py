@@ -722,13 +722,13 @@ class TableBuilder:
                         para.runs[-1].text = para.runs[-1].text.rstrip('\n')
                         logger.debug("Removed trailing line breaks from table cell")
 
-                # Force left alignment ONLY for multiline content (contains actual line breaks)
-                # This is needed for content with <br> tags that should maintain line structure
-                if para.text.strip() and '\n' in para.text:
-                    current_alignment = para.paragraph_format.alignment
-                    if current_alignment not in [1, 2]:  # Not CENTER or RIGHT
-                        para.paragraph_format.alignment = 0  # Force LEFT
-                        logger.debug("Forced left alignment for multiline paragraph with line breaks")
+                # Force left alignment for table cell content (both single-line and multi-line)
+                # This ensures consistent left alignment for all table cells without explicit alignment
+                # Only skip if alignment is explicitly set to CENTER or RIGHT
+                current_alignment = para.paragraph_format.alignment
+                if current_alignment not in [1, 2]:  # Not CENTER or RIGHT
+                    para.paragraph_format.alignment = 0  # Force LEFT
+                    logger.debug("Forced left alignment for table cell paragraph")
 
 
     def _process_cell_element_children(self, paragraph, element: DOMNode, base_styles: Dict[str, Any]):
