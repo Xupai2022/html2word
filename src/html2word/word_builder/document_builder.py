@@ -56,6 +56,15 @@ class DocumentBuilder:
         """
         logger.info("Building Word document")
 
+        # Apply cover image FIRST (before any other content)
+        if self.enable_header_footer:
+            try:
+                logger.info("Adding cover image to document")
+                self.header_footer_builder.apply_cover_image()
+            except Exception as e:
+                logger.error(f"Failed to add cover image: {e}", exc_info=True)
+                # Continue even if cover image fails
+
         # Get body content
         from html2word.parser.html_parser import HTMLParser
         parser = HTMLParser()

@@ -26,6 +26,33 @@ class HeaderFooterConfig:
     # 是否启用页脚 (Enable footer)
     ENABLE_FOOTER = True
 
+    # ==================== 封面图片配置 Cover Image Configuration ====================
+
+    # 是否启用封面图片 (Enable cover image on first page)
+    ENABLE_COVER_IMAGE = True
+
+    # 封面图片路径 (Cover image path)
+    # 相对于项目根目录的路径 (Path relative to project root)
+    COVER_IMAGE_PATH = "pic/cover.png"
+
+    # 封面图片宽度（英寸）(Cover image width in inches)
+    # 设置为 None 时会自动计算以适应页面宽度
+    COVER_IMAGE_WIDTH = 5  # inches - 默认为页面内容区域宽度
+
+    # 封面图片高度（英寸）(Cover image height in inches)
+    # 设置为 None 时会按比例自动计算
+    COVER_IMAGE_HEIGHT = None  # inches - None 表示按比例自动计算
+
+    # 封面图片后是否添加分页符 (Add page break after cover image)
+    COVER_ADD_PAGE_BREAK = False
+
+    # 封面图片对齐方式 (Cover image alignment)
+    # 可选: "LEFT", "CENTER", "RIGHT"
+    COVER_IMAGE_ALIGNMENT = "CENTER"
+
+    # 封面图片下方间距（磅）(Space below cover image in points)
+    COVER_IMAGE_SPACE_AFTER = 12  # pt
+
     # ==================== 页眉配置 Header Configuration ====================
 
     # === 页眉图片设置 Header Image Settings ===
@@ -248,6 +275,22 @@ class HeaderFooterConfig:
     FOOTER_LINE_WIDTH = 0.5  # pt
 
     # ==================== 方法 Methods ====================
+
+    @classmethod
+    def get_cover_image_path(cls, base_path: str = None) -> Path:
+        """
+        获取封面图片的完整路径
+        Get full path for cover image
+
+        Args:
+            base_path: 项目根目录路径 (Project root path)
+
+        Returns:
+            完整的图片路径 (Full image path)
+        """
+        if base_path is None:
+            base_path = os.getcwd()
+        return Path(base_path) / cls.COVER_IMAGE_PATH
 
     @classmethod
     def get_header_left_image_path(cls, base_path: str = None) -> Path:

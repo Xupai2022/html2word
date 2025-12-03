@@ -32,6 +32,73 @@ class HeaderFooterBuilder:
         self.base_path = base_path
         self.config = HeaderFooterConfig()
 
+    def apply_cover_image(self):
+        """
+        Apply cover image at the beginning of the document.
+
+        This should be called BEFORE building the main content.
+        封面图片会插入到文档的最开头位置。
+        """
+        if not self.config.ENABLE_COVER_IMAGE:
+            logger.info("Cover image is disabled in configuration")
+            return
+
+        cover_image_path = self.config.get_cover_image_path(self.base_path)
+
+        if not cover_image_path.exists():
+            logger.warning(f"Cover image not found: {cover_image_path}")
+            return
+
+        try:
+            logger.info(f"Adding cover image: {cover_image_path}")
+
+            # Create a paragraph for the cover image
+            paragraph = self.document.add_paragraph()
+
+            # Set alignment
+            alignment = self.config.COVER_IMAGE_ALIGNMENT
+            if alignment == "CENTER":
+                paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            elif alignment == "RIGHT":
+                paragraph.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+            else:
+                paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
+
+            # Add the image
+            run = paragraph.add_run()
+
+            # Determine image dimensions
+            width = None
+            height = None
+
+            if self.config.COVER_IMAGE_WIDTH is not None:
+                width = Inches(self.config.COVER_IMAGE_WIDTH)
+
+            if self.config.COVER_IMAGE_HEIGHT is not None:
+                height = Inches(self.config.COVER_IMAGE_HEIGHT)
+
+            # Add picture with specified dimensions
+            if width and height:
+                run.add_picture(str(cover_image_path), width=width, height=height)
+            elif width:
+                run.add_picture(str(cover_image_path), width=width)
+            elif height:
+                run.add_picture(str(cover_image_path), height=height)
+            else:
+                run.add_picture(str(cover_image_path))
+
+            # Set space after the cover image
+            paragraph.paragraph_format.space_after = Pt(self.config.COVER_IMAGE_SPACE_AFTER)
+
+            # Add page break after cover if configured
+            if self.config.COVER_ADD_PAGE_BREAK:
+                self.document.add_page_break()
+
+            logger.info("Cover image added successfully")
+
+        except Exception as e:
+            logger.error(f"Failed to add cover image: {e}", exc_info=True)
+
     def apply_headers_footers(self):
         """
         Apply headers and footers to the document based on configuration.
