@@ -352,23 +352,13 @@ class ImageBuilder:
                 logger.debug(f"Skipping SVG with zero or very small dimensions: {width_val}x{height_val}")
                 return None
 
-            # Try method 1: BrowserSVGConverter (best for complex charts)
+            # Try BrowserSVGConverter (Chrome headless)
             png_data = self._convert_svg_with_browser(svg_content, width_val, height_val)
             if png_data:
                 return self._insert_svg_as_image(png_data, width_val, height_val, "Browser", in_table_cell)
 
-            # Try method 2: cairosvg (high quality)
-            png_data = self._convert_svg_with_cairosvg(svg_content)
-            if png_data:
-                return self._insert_svg_as_image(png_data, width_val, height_val, "cairosvg", in_table_cell)
-
-            # Try method 3: svglib + reportlab
-            png_data = self._convert_svg_with_svglib(svg_content, width_val, height_val)
-            if png_data:
-                return self._insert_svg_as_image(png_data, width_val, height_val, "svglib", in_table_cell)
-
-            # Fallback: cairosvg and svglib failed
-            logger.warning("SVG conversion failed: Both cairosvg and svglib not available or failed")
+            # Fallback: Browser conversion failed
+            logger.warning("SVG conversion failed: Browser conversion not available or failed")
             return self._create_svg_fallback_placeholder(svg_node, width, height)
 
         except Exception as e:
@@ -573,69 +563,6 @@ class ImageBuilder:
             return None
         except Exception as e:
             logger.warning(f"Browser conversion failed: {e}")
-            return None
-
-    def _convert_svg_with_cairosvg(self, svg_content: str) -> Optional[bytes]:
-        """
-        Convert SVG to PNG using cairosvg.
-
-        Args:
-            svg_content: SVG XML string
-
-        Returns:
-            PNG data as bytes or None
-        """
-        try:
-            import cairosvg
-            png_data = cairosvg.svg2png(bytestring=svg_content.encode('utf-8'))
-            logger.debug("SVG converted using cairosvg")
-            return png_data
-        except ImportError:
-            logger.debug("cairosvg not available")
-            return None
-        except Exception as e:
-            logger.warning(f"cairosvg conversion failed: {e}")
-            return None
-
-    def _convert_svg_with_svglib(self, svg_content: str, width_pt: float, height_pt: float) -> Optional[bytes]:
-        """
-        Convert SVG to PNG using svglib + reportlab.
-
-        Args:
-            svg_content: SVG XML string
-            width_pt: Target width in points
-            height_pt: Target height in points
-
-        Returns:
-            PNG data as bytes or None
-        """
-        try:
-            from svglib.svglib import svg2rlg
-            from reportlab.graphics import renderPM
-            from io import StringIO
-
-            # Parse SVG
-            svg_stream = StringIO(svg_content)
-            drawing = svg2rlg(svg_stream)
-
-            if not drawing:
-                return None
-
-            # Set dimensions
-            drawing.width = width_pt
-            drawing.height = height_pt
-            drawing.scale(width_pt / drawing.width, height_pt / drawing.height)
-
-            # Render to PNG
-            png_data = renderPM.drawToString(drawing, fmt='PNG')
-            logger.debug("SVG converted using svglib")
-            return png_data
-
-        except ImportError:
-            logger.debug("svglib/reportlab not available")
-            return None
-        except Exception as e:
-            logger.warning(f"svglib conversion failed: {e}")
             return None
 
     def _insert_svg_as_image(self, png_data: bytes, width_pt: float, height_pt: float, method: str, in_table_cell: bool = False) -> Optional[object]:
