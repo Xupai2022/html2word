@@ -205,24 +205,20 @@ class StyleMapper:
                 logger.debug(f"Error setting line-height: {e}")
                 pass
 
-        # Margins (spacing) - Implement true CSS margin collapse
-        # CSS spec: Adjacent vertical margins collapse to the LARGER of the two values
-        # Example: element A has margin-bottom: 30pt, element B has margin-top: 50pt
-        #          → Actual spacing between A and B is max(30, 50) = 50pt (NOT 80pt)
+        # Margins (spacing) - Simplified approach for consistent Word output
+        # Unlike CSS where adjacent margins collapse, Word's space_before/space_after are additive.
+        # To ensure consistent paragraph spacing, we always set space_before when margin_top > 0.
+        # This guarantees paragraphs have proper spacing regardless of preceding element type.
         if box_model:
             margin_top = box_model.margin.top
             margin_bottom = box_model.margin.bottom
 
-            # True margin collapse: compare current margin-top with previous margin-bottom
-            # Take the larger value
-            if margin_top > prev_margin_bottom:
-                # Current element's margin-top is larger than previous element's margin-bottom
-                # Need to add extra spacing via space_before to reach the correct total
-                extra_spacing = margin_top - prev_margin_bottom
-                if extra_spacing > 0:
-                    fmt.space_before = Pt(extra_spacing)
-                    logger.debug(f"Margin collapse: margin-top {margin_top}pt > prev margin-bottom {prev_margin_bottom}pt, adding space_before={extra_spacing}pt")
-            # else: Previous margin-bottom already provides enough spacing (it was larger)
+            # Always apply margin_top as space_before for consistent spacing
+            # This ensures paragraphs have proper spacing regardless of what precedes them
+            # (tables, images, or other non-paragraph elements may not have space_after)
+            if margin_top > 0:
+                fmt.space_before = Pt(margin_top)
+                logger.debug(f"Setting space_before={margin_top}pt (margin_top)")
 
             # Always set margin-bottom as space_after for next element
             if margin_bottom > 0:
