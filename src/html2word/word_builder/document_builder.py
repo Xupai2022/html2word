@@ -811,10 +811,24 @@ class DocumentBuilder:
                 svg_node._preprocessed_svg_content = svg_content
 
                 # 3. 计算像素尺寸 (逻辑与 ImageBuilder._convert_svg_with_browser 保持一致)
-                # 先转为 pt
-                width_pt = self.image_builder._parse_dimension(width_str)
-                height_pt = self.image_builder._parse_dimension(height_str)
-                
+                # Get font-size for em/rem unit calculations
+                font_size_pt = 12.0  # Default
+                font_size_str = svg_node.computed_styles.get('font-size', '')
+                if font_size_str:
+                    import re
+                    fs_match = re.match(r'([\d.]+)(px|pt)?', str(font_size_str))
+                    if fs_match:
+                        fs_num = float(fs_match.group(1))
+                        fs_unit = fs_match.group(2) or 'px'
+                        if fs_unit == 'px':
+                            font_size_pt = fs_num * 0.75
+                        elif fs_unit == 'pt':
+                            font_size_pt = fs_num
+
+                # 先转为 pt (with font-size context for em units)
+                width_pt = self.image_builder._parse_dimension(width_str, font_size_pt)
+                height_pt = self.image_builder._parse_dimension(height_str, font_size_pt)
+
                 # 再转为 px (96 DPI)
                 width_px = int(width_pt * 96 / 72)
                 height_px = int(height_pt * 96 / 72)

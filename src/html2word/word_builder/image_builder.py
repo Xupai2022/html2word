@@ -314,7 +314,7 @@ class ImageBuilder:
             use_element = self._find_use_element(svg_node)
             if use_element and self._is_missing_symbol(use_element, svg_node):
                 logger.debug("SVG icon references missing symbol, creating fallback")
-                return self._create_icon_fallback(use_element, width, height)
+                return self._create_icon_fallback(use_element, width, height, svg_node)
 
             # Get SVG content: use preprocessed content if available (ensures cache consistency)
             if hasattr(svg_node, '_preprocessed_svg_content'):
@@ -328,9 +328,24 @@ class ImageBuilder:
                 logger.warning("Empty SVG content")
                 return None
 
-            # Parse dimensions
-            width_val = self._parse_dimension(width)
-            height_val = self._parse_dimension(height)
+            # Get font-size for em/rem unit calculations
+            font_size_pt = 12.0  # Default
+            font_size_str = svg_node.computed_styles.get('font-size', '')
+            if font_size_str:
+                # Parse font-size (typically in px)
+                import re
+                fs_match = re.match(r'([\d.]+)(px|pt)?', str(font_size_str))
+                if fs_match:
+                    fs_num = float(fs_match.group(1))
+                    fs_unit = fs_match.group(2) or 'px'
+                    if fs_unit == 'px':
+                        font_size_pt = fs_num * 0.75
+                    elif fs_unit == 'pt':
+                        font_size_pt = fs_num
+
+            # Parse dimensions with font-size context for em units
+            width_val = self._parse_dimension(width, font_size_pt)
+            height_val = self._parse_dimension(height, font_size_pt)
 
             # Skip SVGs with zero or very small dimensions
             if width_val < 1 or height_val < 1:
@@ -400,7 +415,7 @@ class ImageBuilder:
 
         return not find_symbol(root, symbol_id)
 
-    def _create_icon_fallback(self, use_element: DOMNode, width: str, height: str) -> Optional[object]:
+    def _create_icon_fallback(self, use_element: DOMNode, width: str, height: str, svg_node: DOMNode = None) -> Optional[object]:
         """
         Create a fallback icon for missing SVG symbols.
 
@@ -408,6 +423,7 @@ class ImageBuilder:
             use_element: The use element that references a missing symbol
             width: Width of the icon
             height: Height of the icon
+            svg_node: Parent SVG node (for getting font-size context)
 
         Returns:
             python-docx InlineShape object or None
@@ -417,9 +433,24 @@ class ImageBuilder:
             import io
             from docx.shared import Inches
 
-            # Parse dimensions
-            width_val = int(self._parse_dimension(width))
-            height_val = int(self._parse_dimension(height))
+            # Get font-size for em/rem unit calculations
+            font_size_pt = 12.0  # Default
+            if svg_node:
+                font_size_str = svg_node.computed_styles.get('font-size', '')
+                if font_size_str:
+                    import re
+                    fs_match = re.match(r'([\d.]+)(px|pt)?', str(font_size_str))
+                    if fs_match:
+                        fs_num = float(fs_match.group(1))
+                        fs_unit = fs_match.group(2) or 'px'
+                        if fs_unit == 'px':
+                            font_size_pt = fs_num * 0.75
+                        elif fs_unit == 'pt':
+                            font_size_pt = fs_num
+
+            # Parse dimensions with font-size context
+            width_val = int(self._parse_dimension(width, font_size_pt))
+            height_val = int(self._parse_dimension(height, font_size_pt))
 
             # Ensure minimum size for icon
             width_val = max(width_val, 16)
@@ -724,12 +755,13 @@ class ImageBuilder:
 
         return "".join(result)
 
-    def _parse_dimension(self, value: str) -> float:
+    def _parse_dimension(self, value: str, font_size_pt: float = 12.0) -> float:
         """
         Parse dimension string to points.
 
         Args:
-            value: Dimension string (e.g., "100", "100px", "2in")
+            value: Dimension string (e.g., "100", "100px", "2in", "1em")
+            font_size_pt: Font size in points for em/rem calculations (default 12pt)
 
         Returns:
             Value in points
@@ -746,8 +778,8 @@ class ImageBuilder:
         except:
             pass
 
-        # Parse with unit
-        match = re.match(r'([\d.]+)(px|pt|in|cm|mm)?', value)
+        # Parse with unit - including em and rem
+        match = re.match(r'([\d.]+)(px|pt|in|cm|mm|em|rem)?', value)
         if match:
             num = float(match.group(1))
             unit = match.group(2) or 'px'
@@ -763,6 +795,12 @@ class ImageBuilder:
                 return num * 28.35
             elif unit == 'mm':
                 return num * 2.835
+            elif unit == 'em':
+                # em is relative to font-size
+                return num * font_size_pt
+            elif unit == 'rem':
+                # rem is relative to root font-size (typically 16px = 12pt)
+                return num * 12.0
 
         return 100.0  # Default
 

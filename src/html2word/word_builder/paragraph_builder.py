@@ -310,9 +310,23 @@ class ParagraphBuilder:
             width = svg_node.get_attribute('width') or svg_node.computed_styles.get('width', '14')
             height = svg_node.get_attribute('height') or svg_node.computed_styles.get('height', '14')
 
-            # Parse dimensions
-            width_pt = image_builder._parse_dimension(width)
-            height_pt = image_builder._parse_dimension(height)
+            # Get font-size for em/rem unit calculations
+            font_size_pt = 12.0  # Default
+            font_size_str = svg_node.computed_styles.get('font-size', '')
+            if font_size_str:
+                import re
+                fs_match = re.match(r'([\d.]+)(px|pt)?', str(font_size_str))
+                if fs_match:
+                    fs_num = float(fs_match.group(1))
+                    fs_unit = fs_match.group(2) or 'px'
+                    if fs_unit == 'px':
+                        font_size_pt = fs_num * 0.75
+                    elif fs_unit == 'pt':
+                        font_size_pt = fs_num
+
+            # Parse dimensions with font-size context for em units
+            width_pt = image_builder._parse_dimension(width, font_size_pt)
+            height_pt = image_builder._parse_dimension(height, font_size_pt)
 
             # Check if this is an icon SVG with use element referencing missing symbol
             use_element = image_builder._find_use_element(svg_node)
