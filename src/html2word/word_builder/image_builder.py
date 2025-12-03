@@ -310,6 +310,12 @@ class ImageBuilder:
             python-docx InlineShape object or None
         """
         try:
+            # Check if this is an icon SVG with use element referencing missing symbol
+            use_element = self._find_use_element(svg_node)
+            if use_element and self._is_missing_symbol(use_element, svg_node):
+                logger.debug("SVG icon references missing symbol, creating fallback")
+                return self._create_icon_fallback(use_element, width, height)
+
             # Get SVG content: use preprocessed content if available (ensures cache consistency)
             if hasattr(svg_node, '_preprocessed_svg_content'):
                 svg_content = svg_node._preprocessed_svg_content
@@ -352,6 +358,153 @@ class ImageBuilder:
 
         except Exception as e:
             logger.error(f"Error processing SVG: {e}")
+            return None
+
+    def _find_use_element(self, svg_node: DOMNode) -> Optional[DOMNode]:
+        """Find the first use element in the SVG node."""
+        for child in svg_node.children:
+            if child.is_element and child.tag == 'use':
+                return child
+        return None
+
+    def _is_missing_symbol(self, use_element: DOMNode, svg_node: DOMNode) -> bool:
+        """
+        Check if the use element references a symbol that doesn't exist in the document.
+
+        Args:
+            use_element: The use element to check
+            svg_node: The parent SVG node
+
+        Returns:
+            True if the referenced symbol is missing
+        """
+        href = use_element.get_attribute('xlink:href') or use_element.get_attribute('href')
+        if not href or not href.startswith('#'):
+            return False
+
+        symbol_id = href[1:]
+
+        # Check if symbol exists in the document by looking for it in the root node
+        root = svg_node
+        while root.parent:
+            root = root.parent
+
+        # Search for the symbol in the entire document
+        def find_symbol(node: DOMNode, symbol_id: str) -> bool:
+            if node.is_element and node.tag == 'symbol' and node.get_attribute('id') == symbol_id:
+                return True
+            for child in node.children:
+                if find_symbol(child, symbol_id):
+                    return True
+            return False
+
+        return not find_symbol(root, symbol_id)
+
+    def _create_icon_fallback(self, use_element: DOMNode, width: str, height: str) -> Optional[object]:
+        """
+        Create a fallback icon for missing SVG symbols.
+
+        Args:
+            use_element: The use element that references a missing symbol
+            width: Width of the icon
+            height: Height of the icon
+
+        Returns:
+            python-docx InlineShape object or None
+        """
+        try:
+            from PIL import Image, ImageDraw, ImageFont
+            import io
+            from docx.shared import Inches
+
+            # Parse dimensions
+            width_val = int(self._parse_dimension(width))
+            height_val = int(self._parse_dimension(height))
+
+            # Ensure minimum size for icon
+            width_val = max(width_val, 16)
+            height_val = max(height_val, 16)
+
+            # Get href to determine icon type
+            href = use_element.get_attribute('xlink:href') or use_element.get_attribute('href')
+            icon_type = 'info'  # Default
+
+            if href:
+                if 'tishi' in href or 'info' in href:
+                    icon_type = 'info'
+                elif 'warning' in href or 'jinggao' in href:
+                    icon_type = 'warning'
+                elif 'error' in href or 'cuowu' in href:
+                    icon_type = 'error'
+                elif 'success' in href or 'zhengque' in href:
+                    icon_type = 'success'
+
+            # Create icon based on type
+            img = Image.new('RGBA', (width_val, height_val), (0, 0, 0, 0))
+            draw = ImageDraw.Draw(img)
+
+            # Colors for different icon types
+            colors = {
+                'info': (86, 125, 245, 255),      # Blue from the original style
+                'warning': (255, 193, 7, 255),    # Amber
+                'error': (244, 67, 54, 255),      # Red
+                'success': (76, 175, 80, 255)     # Green
+            }
+
+            color = colors.get(icon_type, colors['info'])
+
+            # Draw appropriate icon shape
+            if icon_type == 'info':
+                # Draw a circle with 'i' in it - outlined style (white background, blue border, blue text)
+                margin = 1
+                border_width = max(2, width_val // 8)
+                # Draw white filled circle with blue outline
+                draw.ellipse([(margin, margin), (width_val - margin - 1, height_val - margin - 1)],
+                           fill=(255, 255, 255, 255), outline=color, width=border_width)
+
+                # Draw 'i' character in blue
+                try:
+                    # Try to use a font
+                    font_size = int(width_val * 0.6)
+                    font = ImageFont.truetype("arial.ttf", font_size)
+                    bbox = draw.textbbox((0, 0), "i", font=font)
+                    text_width = bbox[2] - bbox[0]
+                    text_height = bbox[3] - bbox[1]
+                    x = (width_val - text_width) // 2
+                    y = (height_val - text_height) // 2 - font_size // 8  # Slight adjustment
+                    draw.text((x, y), "i", fill=color, font=font)
+                except:
+                    # Fallback: draw a simple line for the dot and stem in blue
+                    dot_size = max(1, width_val // 12)
+                    stem_width = max(1, width_val // 16)
+                    # Dot
+                    draw.ellipse([(width_val//2 - dot_size, height_val//4 - dot_size),
+                                (width_val//2 + dot_size, height_val//4 + dot_size)],
+                               fill=color)
+                    # Stem
+                    draw.rectangle([(width_val//2 - stem_width, height_val//4 + dot_size*2),
+                                  (width_val//2 + stem_width, height_val*3//4)],
+                                 fill=color)
+
+            # Save to bytes
+            img_stream = io.BytesIO()
+            img.save(img_stream, format='PNG')
+            img_stream.seek(0)
+
+            # Insert image
+            paragraph = self.document.add_paragraph()
+            run = paragraph.add_run()
+            picture = run.add_picture(
+                img_stream,
+                width=Inches(width_val / 72),
+                height=Inches(height_val / 72)
+            )
+
+            logger.info(f"Created {icon_type} icon fallback for missing SVG symbol")
+            return picture
+
+        except Exception as e:
+            logger.error(f"Failed to create icon fallback: {e}")
             return None
 
     def _convert_svg_with_browser(self, svg_content: str, width_pt: float, height_pt: float) -> Optional[bytes]:

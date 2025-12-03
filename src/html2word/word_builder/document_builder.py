@@ -206,6 +206,11 @@ class DocumentBuilder:
                     # Fallback: process children if conversion fails
                     logger.warning("Background-image conversion failed, falling back to children processing")
                     self._process_children(node)
+            # Check if this is an inline icon + text pattern (like tips/hints)
+            # This should be checked BEFORE the general SVG check
+            elif self._is_icon_text_pattern(node):
+                logger.debug(f"Div is icon+text pattern, treating as single paragraph")
+                self.paragraph_builder.build_paragraph(node)
             # Check if this div contains SVG (ECharts charts) - recursively
             elif self._contains_svg(node):
                 logger.debug(f"Div contains SVG (possibly nested), processing children directly")
@@ -2022,6 +2027,60 @@ class DocumentBuilder:
 
         # Default
         return min(3, num_items)
+
+    def _is_icon_text_pattern(self, node: DOMNode) -> bool:
+        """
+        Check if a div is an icon + text pattern (like tips/hints).
+        Pattern: div containing a small SVG icon followed by text content.
+
+        Args:
+            node: DOM node to check
+
+        Returns:
+            True if this is an icon+text pattern that should be treated as single paragraph
+        """
+        if node.tag != 'div':
+            return False
+
+        # Check for common tip/hint class names
+        classes = node.attributes.get('class', [])
+        if isinstance(classes, str):
+            classes = classes.split()
+
+        tip_classes = ['overall-tips', 'tips', 'hint', 'tip', 'info-tip', 'warning-tip']
+        if any(tc in classes for tc in tip_classes):
+            # Verify it has SVG + text structure
+            has_svg = False
+            has_text = False
+            for child in node.children:
+                if child.is_element and child.tag == 'svg':
+                    has_svg = True
+                elif child.is_element and child.tag in ('span', 'p', 'div', 'a'):
+                    has_text = True
+                elif child.is_text and child.text_content.strip():
+                    has_text = True
+            return has_svg and has_text
+
+        # Also check for flex display with small SVG
+        display = node.computed_styles.get('display', '')
+        if display == 'flex':
+            children = [c for c in node.children if c.is_element]
+            if len(children) >= 2:
+                first_child = children[0]
+                if first_child.tag == 'svg':
+                    # Check if SVG is small (icon-sized)
+                    width = first_child.computed_styles.get('width', '')
+                    height = first_child.computed_styles.get('height', '')
+                    if width and height:
+                        try:
+                            w = float(width.replace('px', ''))
+                            h = float(height.replace('px', ''))
+                            if w <= 24 and h <= 24:  # Small icon
+                                return True
+                        except:
+                            pass
+
+        return False
 
     def _contains_svg(self, node: DOMNode) -> bool:
         """
