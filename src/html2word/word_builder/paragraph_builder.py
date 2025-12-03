@@ -301,43 +301,331 @@ class ParagraphBuilder:
         """
         try:
             from html2word.word_builder.image_builder import ImageBuilder
+            import io
+            from docx.shared import Inches
 
-            # Use ImageBuilder's SVG conversion, but add to existing paragraph
-            width = svg_node.get_attribute('width') or svg_node.computed_styles.get('width', '20')
-            height = svg_node.get_attribute('height') or svg_node.computed_styles.get('height', '20')
-
-            # Get SVG content by serializing
             image_builder = ImageBuilder(self.document)
-            svg_content = image_builder._serialize_svg_node(svg_node, width, height)
 
+            # Get dimensions - for icons, ensure square aspect ratio
+            width = svg_node.get_attribute('width') or svg_node.computed_styles.get('width', '14')
+            height = svg_node.get_attribute('height') or svg_node.computed_styles.get('height', '14')
+
+            # Parse dimensions
+            width_pt = image_builder._parse_dimension(width)
+            height_pt = image_builder._parse_dimension(height)
+
+            # Check if this is an icon SVG with use element referencing missing symbol
+            use_element = image_builder._find_use_element(svg_node)
+
+            # For icons, match size to adjacent text font size for visual consistency
+            if use_element:
+                # Try to get font size from sibling text elements or parent
+                icon_size = self._get_icon_size_from_context(svg_node)
+                width_pt = icon_size
+                height_pt = icon_size
+            if use_element and image_builder._is_missing_symbol(use_element, svg_node):
+                # Create inline icon fallback
+                png_data = self._create_inline_icon_fallback(use_element, width_pt, height_pt, svg_node)
+                if png_data:
+                    image_stream = io.BytesIO(png_data)
+                    run = paragraph.add_run()
+                    run.add_picture(
+                        image_stream,
+                        width=Inches(width_pt / 72),
+                        height=Inches(height_pt / 72)
+                    )
+                    logger.debug(f"Added inline icon fallback ({width}x{height})")
+                return
+
+            # Try to convert SVG to PNG using various methods
+            svg_content = image_builder.serialize_svg_node(svg_node, width, height)
             if not svg_content:
                 return
 
-            # Try to convert SVG to PNG
+            # Try cairosvg first
+            png_data = None
             try:
                 import cairosvg
-                import io
-                from docx.shared import Inches
-
                 png_data = cairosvg.svg2png(bytestring=svg_content.encode('utf-8'))
+            except ImportError:
+                logger.debug("cairosvg not available for inline SVG")
+            except Exception as e:
+                logger.debug(f"cairosvg failed: {e}")
+
+            # Try browser converter if cairosvg failed
+            if not png_data:
+                try:
+                    from html2word.utils.browser_svg_converter import get_browser_converter
+                    converter = get_browser_converter()
+                    width_px = int(width_pt * 96 / 72)
+                    height_px = int(height_pt * 96 / 72)
+                    png_data = converter.convert(svg_content, width_px, height_px)
+                except Exception as e:
+                    logger.debug(f"Browser converter failed: {e}")
+
+            if png_data:
                 image_stream = io.BytesIO(png_data)
-
-                # Parse dimensions (use small sizes for inline SVGs)
-                width_pt = image_builder._parse_dimension(width)
-                height_pt = image_builder._parse_dimension(height)
-
-                # Add inline SVG as image in paragraph run
                 run = paragraph.add_run()
                 run.add_picture(
                     image_stream,
                     width=Inches(width_pt / 72),
                     height=Inches(height_pt / 72)
                 )
-
                 logger.debug(f"Added inline SVG as image ({width}x{height})")
-
-            except ImportError:
-                logger.warning("cairosvg not available, inline SVG skipped")
+            else:
+                logger.warning("Could not convert inline SVG, skipping")
 
         except Exception as e:
             logger.warning(f"Failed to add inline SVG: {e}")
+
+    def _get_icon_size_from_context(self, svg_node: DOMNode) -> float:
+        """
+        Get icon size based on adjacent text font size for visual consistency.
+
+        Args:
+            svg_node: The SVG icon node
+
+        Returns:
+            Icon size in points (matching text font size)
+        """
+        default_size = 12.0  # Default to 12pt (common text size)
+
+        # Check parent node for font-size
+        parent = svg_node.parent
+        if parent:
+            # Check siblings for font-size
+            for sibling in parent.children:
+                if sibling.is_element and sibling.tag in ('span', 'p', 'div', 'a'):
+                    font_size = sibling.computed_styles.get('font-size')
+                    if font_size:
+                        from html2word.word_builder.image_builder import ImageBuilder
+                        ib = ImageBuilder(self.document)
+                        size = ib._parse_dimension(font_size)
+                        if size > 0:
+                            return size
+
+            # Check parent's font-size
+            font_size = parent.computed_styles.get('font-size')
+            if font_size:
+                from html2word.word_builder.image_builder import ImageBuilder
+                ib = ImageBuilder(self.document)
+                size = ib._parse_dimension(font_size)
+                if size > 0:
+                    return size
+
+        # Check SVG's own computed font-size
+        font_size = svg_node.computed_styles.get('font-size')
+        if font_size:
+            from html2word.word_builder.image_builder import ImageBuilder
+            ib = ImageBuilder(self.document)
+            size = ib._parse_dimension(font_size)
+            if size > 0:
+                return size
+
+        return default_size
+
+    def _create_inline_icon_fallback(self, use_element: DOMNode, width_pt: float, height_pt: float, svg_node: DOMNode) -> bytes:
+        """
+        Create a fallback icon PNG for inline SVG with missing symbol.
+        Uses browser rendering with icon font to get exact icon appearance.
+
+        Args:
+            use_element: The use element referencing a missing symbol
+            width_pt: Width in points
+            height_pt: Height in points
+            svg_node: The parent SVG node (for color info)
+
+        Returns:
+            PNG data as bytes or None
+        """
+        # First try browser rendering with icon font
+        png_data = self._render_icon_with_browser(use_element, width_pt, height_pt, svg_node)
+        if png_data:
+            return png_data
+
+        # Fallback to PIL-based icon
+        return self._create_pil_icon_fallback(width_pt, height_pt, svg_node)
+
+    def _render_icon_with_browser(self, _use_element: DOMNode, width_pt: float, height_pt: float, svg_node: DOMNode) -> bytes:
+        """
+        Render icon using Chrome headless to get exact icon appearance.
+        Creates a simple info icon that matches the HTML style.
+        """
+        try:
+            import subprocess
+            import tempfile
+            import os
+            import re
+            import shutil
+
+            # Get color from SVG style
+            color = 'rgb(86, 125, 245)'  # Default blue
+            style = svg_node.get_attribute('style') or ''
+            color_match = re.search(r'color:\s*(rgb\([^)]+\))', style)
+            if color_match:
+                color = color_match.group(1)
+
+            # Convert to pixels
+            width_px = max(int(width_pt * 96 / 72), 16)
+            height_px = max(int(height_pt * 96 / 72), 16)
+
+            # Create HTML that renders an info icon similar to the original
+            html_content = f"""<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <style>
+        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+        html, body {{
+            width: {width_px}px;
+            height: {height_px}px;
+            overflow: hidden;
+            background: transparent;
+        }}
+        .icon {{
+            width: {width_px}px;
+            height: {height_px}px;
+            background: white;
+            border: 2px solid {color};
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: {color};
+            font-family: Arial, sans-serif;
+            font-size: {int(height_px * 0.6)}px;
+            font-weight: bold;
+            font-style: italic;
+        }}
+    </style>
+</head>
+<body>
+    <span class="icon">i</span>
+</body>
+</html>"""
+
+            # Find Chrome
+            chrome_paths = [
+                r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+                r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+                os.path.expandvars(r"%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe"),
+            ]
+
+            chrome_exe = None
+            for path in chrome_paths:
+                if os.path.exists(path):
+                    chrome_exe = path
+                    break
+
+            if not chrome_exe:
+                logger.debug("Chrome not found for icon rendering")
+                return None
+
+            # Create temp files and user data dir
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.html', delete=False, encoding='utf-8') as f:
+                f.write(html_content)
+                html_file = f.name
+
+            screenshot_file = html_file.replace('.html', '.png')
+            user_data_dir = tempfile.mkdtemp(prefix='chrome_icon_')
+
+            try:
+                # Run Chrome headless with separate user data dir to avoid conflicts
+                cmd = [
+                    chrome_exe,
+                    '--headless=new',
+                    '--disable-gpu',
+                    '--no-sandbox',
+                    f'--user-data-dir={user_data_dir}',
+                    f'--window-size={width_px},{height_px}',
+                    '--default-background-color=00000000',
+                    f'--screenshot={screenshot_file}',
+                    f'file:///{html_file}'
+                ]
+
+                subprocess.run(cmd, capture_output=True, timeout=10)
+
+                if os.path.exists(screenshot_file):
+                    with open(screenshot_file, 'rb') as f:
+                        png_data = f.read()
+                    logger.debug(f"Successfully rendered icon with browser ({width_px}x{height_px})")
+                    return png_data
+                else:
+                    logger.debug("Chrome screenshot not created for icon")
+                    return None
+
+            finally:
+                # Cleanup
+                try:
+                    os.unlink(html_file)
+                    if os.path.exists(screenshot_file):
+                        os.unlink(screenshot_file)
+                    shutil.rmtree(user_data_dir, ignore_errors=True)
+                except:
+                    pass
+
+        except Exception as e:
+            logger.debug(f"Browser icon rendering failed: {e}")
+            return None
+
+    def _create_pil_icon_fallback(self, width_pt: float, height_pt: float, svg_node: DOMNode) -> bytes:
+        """
+        Create a simple PIL-based info icon as last resort fallback.
+        """
+        try:
+            from PIL import Image, ImageDraw, ImageFont
+            import re
+
+            # Convert to pixels
+            width_px = max(int(width_pt * 96 / 72), 16)
+            height_px = max(int(height_pt * 96 / 72), 16)
+
+            # Get color from SVG style
+            color = (86, 125, 245, 255)  # Default blue
+            style = svg_node.get_attribute('style') or ''
+            if 'color:' in style:
+                match = re.search(r'color:\s*rgb\((\d+),\s*(\d+),\s*(\d+)\)', style)
+                if match:
+                    color = (int(match.group(1)), int(match.group(2)), int(match.group(3)), 255)
+
+            # Create transparent image
+            img = Image.new('RGBA', (width_px, height_px), (0, 0, 0, 0))
+            draw = ImageDraw.Draw(img)
+
+            # Draw info icon (circle with 'i')
+            margin = width_px // 8
+            draw.ellipse([(margin, margin), (width_px - margin, height_px - margin)],
+                       fill=color, outline=color)
+
+            # Draw 'i' character
+            try:
+                font_size = width_px // 2
+                font = ImageFont.truetype("arial.ttf", font_size)
+                bbox = draw.textbbox((0, 0), "i", font=font)
+                text_width = bbox[2] - bbox[0]
+                text_height = bbox[3] - bbox[1]
+                x = (width_px - text_width) // 2
+                y = (height_px - text_height) // 2 - font_size // 8
+                draw.text((x, y), "i", fill=(255, 255, 255, 255), font=font)
+            except:
+                # Fallback: draw simple 'i' shape
+                center_x = width_px // 2
+                dot_r = max(1, width_px // 10)
+                stem_w = max(1, width_px // 12)
+                draw.ellipse([(center_x - dot_r, height_px // 4 - dot_r),
+                            (center_x + dot_r, height_px // 4 + dot_r)],
+                           fill=(255, 255, 255, 255))
+                draw.rectangle([(center_x - stem_w, height_px // 4 + dot_r * 2),
+                              (center_x + stem_w, height_px * 3 // 4)],
+                             fill=(255, 255, 255, 255))
+
+            # Save to bytes
+            import io
+            img_stream = io.BytesIO()
+            img.save(img_stream, format='PNG')
+            img_stream.seek(0)
+            return img_stream.getvalue()
+
+        except Exception as e:
+            logger.warning(f"Failed to create PIL icon fallback: {e}")
+            return None
