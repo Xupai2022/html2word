@@ -606,32 +606,34 @@ class ParagraphBuilder:
             img = Image.new('RGBA', (width_px, height_px), (0, 0, 0, 0))
             draw = ImageDraw.Draw(img)
 
-            # Draw info icon (circle with 'i')
-            margin = width_px // 8
-            draw.ellipse([(margin, margin), (width_px - margin, height_px - margin)],
-                       fill=color, outline=color)
+            # Draw info icon (outlined style: white background, blue border, blue text)
+            margin = 1
+            border_width = max(2, width_px // 8)
+            # Draw white filled circle with blue outline
+            draw.ellipse([(margin, margin), (width_px - margin - 1, height_px - margin - 1)],
+                       fill=(255, 255, 255, 255), outline=color, width=border_width)
 
-            # Draw 'i' character
+            # Draw 'i' character in blue
             try:
-                font_size = width_px // 2
+                font_size = int(width_px * 0.6)
                 font = ImageFont.truetype("arial.ttf", font_size)
                 bbox = draw.textbbox((0, 0), "i", font=font)
                 text_width = bbox[2] - bbox[0]
                 text_height = bbox[3] - bbox[1]
                 x = (width_px - text_width) // 2
                 y = (height_px - text_height) // 2 - font_size // 8
-                draw.text((x, y), "i", fill=(255, 255, 255, 255), font=font)
+                draw.text((x, y), "i", fill=color, font=font)
             except:
-                # Fallback: draw simple 'i' shape
+                # Fallback: draw simple 'i' shape in blue
                 center_x = width_px // 2
                 dot_r = max(1, width_px // 10)
                 stem_w = max(1, width_px // 12)
                 draw.ellipse([(center_x - dot_r, height_px // 4 - dot_r),
                             (center_x + dot_r, height_px // 4 + dot_r)],
-                           fill=(255, 255, 255, 255))
+                           fill=color)
                 draw.rectangle([(center_x - stem_w, height_px // 4 + dot_r * 2),
                               (center_x + stem_w, height_px * 3 // 4)],
-                             fill=(255, 255, 255, 255))
+                             fill=color)
 
             # Save to bytes
             import io
