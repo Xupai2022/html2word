@@ -378,15 +378,41 @@ class ParagraphBuilder:
                     logger.debug(f"Browser converter failed: {e}")
 
             if png_data:
-                image_stream = io.BytesIO(png_data)
-                run = paragraph.add_run()
-                run.add_picture(
-                    image_stream,
-                    width=Inches(width_pt / 72),
-                    height=Inches(height_pt / 72)
-                )
-                logger.debug(f"Added inline SVG as image ({width}x{height})")
+                # Check if the PNG is actually not blank (has non-white pixels)
+                if self._is_blank_image(png_data):
+                    logger.debug(f"SVG rendered as blank image, using fallback for icon")
+                    # Use fallback icon if the rendered image is blank
+                    if use_element:
+                        png_data = self._create_inline_icon_fallback(use_element, width_pt, height_pt, svg_node)
+                    else:
+                        png_data = self._create_pil_icon_fallback(width_pt, height_pt, svg_node)
+
+                if png_data:
+                    image_stream = io.BytesIO(png_data)
+                    run = paragraph.add_run()
+                    run.add_picture(
+                        image_stream,
+                        width=Inches(width_pt / 72),
+                        height=Inches(height_pt / 72)
+                    )
+                    logger.debug(f"Added inline SVG as image ({width}x{height})")
+                else:
+                    logger.warning("Could not convert inline SVG, skipping")
             else:
+                # No PNG data, try fallback icon if there's a use element
+                if use_element:
+                    logger.debug(f"SVG conversion failed, using fallback icon")
+                    png_data = self._create_inline_icon_fallback(use_element, width_pt, height_pt, svg_node)
+                    if png_data:
+                        image_stream = io.BytesIO(png_data)
+                        run = paragraph.add_run()
+                        run.add_picture(
+                            image_stream,
+                            width=Inches(width_pt / 72),
+                            height=Inches(height_pt / 72)
+                        )
+                        logger.debug(f"Added fallback icon ({width}x{height})")
+                        return
                 logger.warning("Could not convert inline SVG, skipping")
 
         except Exception as e:
@@ -581,6 +607,48 @@ class ParagraphBuilder:
         except Exception as e:
             logger.debug(f"Browser icon rendering failed: {e}")
             return None
+
+    def _is_blank_image(self, png_data: bytes) -> bool:
+        """
+        Check if a PNG image is mostly blank (white or transparent).
+
+        Args:
+            png_data: PNG image data as bytes
+
+        Returns:
+            True if the image is mostly blank, False otherwise
+        """
+        try:
+            from PIL import Image
+            import io
+
+            img = Image.open(io.BytesIO(png_data))
+
+            # Convert to RGBA if necessary
+            if img.mode != 'RGBA':
+                img = img.convert('RGBA')
+
+            # Get image data
+            pixels = list(img.getdata())
+            total_pixels = len(pixels)
+            if total_pixels == 0:
+                return True
+
+            # Count non-blank pixels (not white and not fully transparent)
+            non_blank_count = 0
+            for pixel in pixels:
+                r, g, b, a = pixel
+                # Consider a pixel non-blank if it's not white and not fully transparent
+                if a > 10 and (r < 250 or g < 250 or b < 250):
+                    non_blank_count += 1
+
+            # If less than 5% of pixels are non-blank, consider it blank
+            blank_threshold = 0.05
+            return non_blank_count / total_pixels < blank_threshold
+
+        except Exception as e:
+            logger.debug(f"Error checking if image is blank: {e}")
+            return False  # Assume not blank if we can't check
 
     def _create_pil_icon_fallback(self, width_pt: float, height_pt: float, svg_node: DOMNode) -> bytes:
         """
