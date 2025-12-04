@@ -196,6 +196,7 @@ html2word/
 │   ├── converter.py         # 主转换器
 │   ├── parser/              # HTML/CSS 解析模块
 │   ├── style/               # 样式处理模块
+│   ├── layout/              # 布局计算模块
 │   ├── elements/            # 元素转换器
 │   ├── word_builder/        # Word 文档构建模块
 │   ├── utils/               # 工具函数
@@ -217,4 +218,3 @@ html2word/
 
 ---
 
-*此文档由 Claude Code 自动生成*

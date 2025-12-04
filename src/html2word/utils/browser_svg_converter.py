@@ -143,15 +143,24 @@ class BrowserSVGConverter:
         try:
             # 查找Chrome可执行文件
             chrome_paths = [
+                # Windows
                 r"C:\Program Files\Google\Chrome\Application\chrome.exe",
                 r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
                 os.path.expandvars(r"%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe"),
+                # Linux
+                "/usr/bin/google-chrome",
+                "/usr/bin/google-chrome-stable",
+                "/usr/bin/chromium-browser",
+                "/usr/bin/chromium",
+                # Mac
+                "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
             ]
 
             chrome_exe = None
             for path in chrome_paths:
                 if os.path.exists(path):
                     chrome_exe = path
+                    logger.debug(f"Found Chrome at: {path}")
                     break
 
             if not chrome_exe:
@@ -206,6 +215,9 @@ class BrowserSVGConverter:
             # 创建临时PNG文件
             png_file = tempfile.mktemp(suffix='.png')
 
+            # 使用 2x 或 3x 缩放因子提高截图清晰度
+            scale_factor = int(os.environ.get('HTML2WORD_SCREENSHOT_SCALE', '2'))
+
             try:
                 # 使用Chrome headless截图
                 cmd = [
@@ -214,13 +226,13 @@ class BrowserSVGConverter:
                     '--disable-gpu',
                     '--no-sandbox',
                     '--hide-scrollbars',  # 隐藏滚动条
-                    '--force-device-scale-factor=1',  # 确保1:1像素比例
+                    f'--force-device-scale-factor={scale_factor}',  # 提高分辨率
                     f'--window-size={target_width},{target_height}',
                     f'--screenshot={png_file}',
                     html_file
                 ]
 
-                logger.debug(f"Running Chrome subprocess for {width}x{height} (window: {target_width}x{target_height})")
+                logger.debug(f"Running Chrome subprocess for {width}x{height} (window: {target_width}x{target_height}) with {scale_factor}x scale")
 
                 # 运行Chrome
                 try:
@@ -236,17 +248,25 @@ class BrowserSVGConverter:
 
                 # 读取PNG文件
                 if os.path.exists(png_file):
-                    # 如果使用了裁剪，使用PIL裁剪图片
+                    from PIL import Image
+
+                    # Chrome 生成的图片会按 scale_factor 放大
+                    scaled_width = width * scale_factor
+                    scaled_height = height * scale_factor
+                    scaled_target_width = target_width * scale_factor
+                    scaled_target_height = target_height * scale_factor
+
+                    # 如果使用了裁剪，使用PIL裁剪图片（保持高分辨率）
                     if use_cropping:
                         try:
                             from PIL import Image
                             with Image.open(png_file) as img:
-                                # 裁剪回原始尺寸 (0, 0, width, height)
-                                cropped = img.crop((0, 0, width, height))
+                                # 裁剪到实际需要的尺寸（保持高分辨率，不缩放）
+                                cropped = img.crop((0, 0, scaled_width, scaled_height))
                                 output = io.BytesIO()
-                                cropped.save(output, format='PNG')
+                                cropped.save(output, format='PNG', optimize=True)
                                 png_data = output.getvalue()
-                                logger.debug(f"Cropped PNG from {target_width}x{target_height} to {width}x{height}")
+                                logger.debug(f"Cropped high-res PNG: {scaled_target_width}x{scaled_target_height} -> {scaled_width}x{scaled_height} (kept at {scale_factor}x resolution)")
                         except ImportError:
                             logger.warning("PIL not installed, returning uncropped image")
                             with open(png_file, 'rb') as f:
@@ -257,10 +277,12 @@ class BrowserSVGConverter:
                             with open(png_file, 'rb') as f:
                                 png_data = f.read()
                     else:
+                        # 不裁剪，直接保存高分辨率图片
                         with open(png_file, 'rb') as f:
                             png_data = f.read()
+                        logger.debug(f"Using full high-res PNG at {scale_factor}x resolution")
 
-                    logger.info(f"Chrome subprocess: Successfully converted SVG to PNG ({width}x{height})")
+                    logger.info(f"Chrome subprocess: Successfully converted SVG to PNG ({scaled_width}x{scaled_height} at {scale_factor}x scale)")
                     return png_data
                 else:
                     logger.debug(f"Chrome subprocess: PNG file not created. Stderr: {result.stderr.decode('utf-8', errors='ignore') if result else 'None'}")

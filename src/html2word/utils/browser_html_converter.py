@@ -127,6 +127,10 @@ class BrowserHTMLConverter:
             # 创建临时 PNG 文件
             png_file = tempfile.mktemp(suffix='.png')
 
+            # 使用 2x 或 3x 缩放因子提高截图清晰度
+            # 可以通过环境变量配置，默认 2x
+            scale_factor = int(os.environ.get('HTML2WORD_SCREENSHOT_SCALE', '2'))
+
             try:
                 # 使用 Chrome headless 截图
                 cmd = [
@@ -135,13 +139,13 @@ class BrowserHTMLConverter:
                     '--disable-gpu',
                     '--no-sandbox',
                     '--hide-scrollbars',
-                    '--force-device-scale-factor=1',
+                    f'--force-device-scale-factor={scale_factor}',
                     f'--window-size={target_width},{target_height}',
                     f'--screenshot={png_file}',
                     html_file
                 ]
 
-                logger.debug(f"Running Chrome for HTML screenshot {width}x{height}")
+                logger.debug(f"Running Chrome for HTML screenshot {width}x{height} with {scale_factor}x scale")
 
                 try:
                     result = subprocess.run(
@@ -156,24 +160,34 @@ class BrowserHTMLConverter:
 
                 # 读取 PNG 文件
                 if os.path.exists(png_file):
+                    from PIL import Image
+
+                    # Chrome 生成的图片会按 scale_factor 放大
+                    scaled_width = width * scale_factor
+                    scaled_height = height * scale_factor
+                    scaled_target_width = target_width * scale_factor
+                    scaled_target_height = target_height * scale_factor
+
                     if use_cropping:
                         try:
-                            from PIL import Image
                             with Image.open(png_file) as img:
-                                cropped = img.crop((0, 0, width, height))
+                                # 裁剪到实际需要的尺寸（保持高分辨率，不缩放）
+                                cropped = img.crop((0, 0, scaled_width, scaled_height))
                                 output = io.BytesIO()
-                                cropped.save(output, format='PNG')
+                                cropped.save(output, format='PNG', optimize=True)
                                 png_data = output.getvalue()
-                                logger.debug(f"Cropped PNG from {target_width}x{target_height} to {width}x{height}")
+                                logger.debug(f"Cropped high-res PNG: {scaled_target_width}x{scaled_target_height} -> {scaled_width}x{scaled_height} (kept at {scale_factor}x resolution)")
                         except Exception as e:
-                            logger.warning(f"Failed to crop image: {e}")
+                            logger.warning(f"Failed to crop high-res image: {e}")
                             with open(png_file, 'rb') as f:
                                 png_data = f.read()
                     else:
+                        # 不裁剪，直接保存高分辨率图片
                         with open(png_file, 'rb') as f:
                             png_data = f.read()
+                        logger.debug(f"Using full high-res PNG at {scale_factor}x resolution")
 
-                    logger.info(f"Chrome: Successfully rendered HTML to PNG ({width}x{height}, {len(png_data)} bytes)")
+                    logger.info(f"Chrome: Successfully rendered HTML to PNG ({scaled_width}x{scaled_height} at {scale_factor}x scale, {len(png_data)} bytes)")
                     return png_data
                 else:
                     stderr = result.stderr.decode('utf-8', errors='ignore') if result else 'None'

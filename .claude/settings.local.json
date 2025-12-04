@@ -44,7 +44,8 @@
       "Bash(findstr:*)",
       "Bash(tr:*)",
       "Bash(xargs ls:*)",
-      "Bash(timeout 180 python:*)"
+      "Bash(timeout 180 python:*)",
+      "Bash(1 echo 'Log saved, checking...' grep -a -E \"(Child:|classes=|font-size|width:|Element|count__big)\" debug_log.txt)"
     ],
     "deny": [],
     "ask": []
