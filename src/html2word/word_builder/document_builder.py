@@ -1019,13 +1019,302 @@ class DocumentBuilder:
         else:
             return f"<{tag}{attrs_str}>{children_html}</{tag}>"
 
+    def _build_html_for_screenshot(self, node: DOMNode, width_px: int, height_px: int) -> str:
+        """
+        构建用于 Chrome 截图的完整 HTML 文档。
+
+        将带有 background-image 的 DOM 节点及其子元素（绝对定位文字）
+        序列化为一个完整的 HTML 文档，以便 Chrome headless 渲染截图。
+
+        Args:
+            node: 带有 background-image 的 DOM 节点
+            width_px: 目标宽度（像素）
+            height_px: 目标高度（像素）
+
+        Returns:
+            完整的 HTML 文档字符串
+        """
+        # 获取背景图
+        bg_image_css = node.computed_styles.get('background-image', '') or \
+                      (node.inline_styles.get('background-image', '') if hasattr(node, 'inline_styles') else '')
+
+        # 确保 background-image 有正确的 url() 包装
+        if bg_image_css and 'url(' not in bg_image_css and 'data:image' in bg_image_css:
+            bg_image_css = f'url("{bg_image_css}")'
+
+        # 构建子元素的 HTML
+        children_html = []
+        for child in node.children:
+            if child.is_element:
+                text_content = child.get_text_content() if hasattr(child, 'get_text_content') else ''
+                if not text_content.strip():
+                    continue
+
+                # 获取元素的 class 属性
+                child_class = ''
+                if hasattr(child, 'element') and child.element is not None:
+                    child_class = child.element.get('class', '')
+                elif hasattr(child, 'attributes'):
+                    child_class = child.attributes.get('class', '')
+
+                # 获取样式
+                styles = []
+
+                # 位置
+                top = '0'
+                left = '0'
+                if hasattr(child, 'inline_styles') and child.inline_styles:
+                    top = child.inline_styles.get('top', top)
+                    left = child.inline_styles.get('left', left)
+                if top == '0' and hasattr(child, 'computed_styles'):
+                    top = child.computed_styles.get('top', '0')
+                if left == '0' and hasattr(child, 'computed_styles'):
+                    left = child.computed_styles.get('left', '0')
+
+                styles.append(f"top: {top}")
+                styles.append(f"left: {left}")
+
+                # 根据 class 名推断样式（用于 CSS 类定义的样式）
+                # 重要：使用硬编码的类名样式，不要被 computed_styles 覆盖
+                # 因为 CSS 解析器可能返回错误的值（如缺少 px 单位）
+                is_data_text = 'data-text' in child_class
+                is_count_big = 'count__big' in child_class
+                is_count_small = 'count__small' in child_class
+                is_comment = 'comment' in child_class
+
+                # data-text 类的样式：transform 居中
+                if is_data_text:
+                    styles.append("transform: translateX(-50%)")
+                    styles.append("text-align: center")
+                    # count__big 有自己的 width，普通 data-text 使用 80px
+                    if is_count_big:
+                        # 从 inline_styles 获取 width（如 290px, 236px 等）
+                        inline_width = None
+                        if hasattr(child, 'inline_styles') and child.inline_styles:
+                            inline_width = child.inline_styles.get('width')
+                        if inline_width and 'px' in str(inline_width):
+                            styles.append(f"width: {inline_width}")
+                        else:
+                            styles.append("width: 290px")  # count__big 默认宽度
+                    else:
+                        styles.append("width: 80px")
+
+                # 字体大小和粗细 - 使用硬编码值，不被 computed_styles 覆盖
+                if is_count_big:
+                    font_size = '18px'
+                    font_weight = '700'
+                elif is_count_small:
+                    font_size = '12px'
+                    font_weight = '400'
+                elif is_data_text:
+                    font_size = '12px'
+                    font_weight = '400'
+                elif is_comment:
+                    font_size = '11px'
+                    font_weight = '400'
+                else:
+                    font_size = '12px'
+                    font_weight = '400'
+
+                styles.append(f"font-size: {font_size}")
+                styles.append(f"font-weight: {font_weight}")
+
+                # 颜色 - 根据 class 名固定，不从 inline_styles 获取
+                # 因为 CSS 解析器可能将其他规则的值错误合并
+                if is_comment:
+                    color = '#14161a'
+                else:
+                    # data-text 和 count__big 等在深色背景上显示的文字使用白色
+                    color = '#fff'
+                styles.append(f"color: {color}")
+
+                # 行高 - 使用固定值，不从 computed_styles 获取（可能缺少单位）
+                styles.append("line-height: 20px")
+
+                style_str = '; '.join(styles)
+                # 转义 HTML 特殊字符
+                import html
+                safe_text = html.escape(text_content.strip())
+                children_html.append(f'<div style="{style_str}">{safe_text}</div>')
+
+        children_str = '\n    '.join(children_html)
+
+        # 构建完整 HTML
+        html_doc = f"""<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+* {{ margin: 0; padding: 0; box-sizing: border-box; }}
+html, body {{
+    width: {width_px}px;
+    height: {height_px}px;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+}}
+
+.container {{
+    position: relative;
+    width: {width_px}px;
+    height: {height_px}px;
+    background-image: {bg_image_css};
+    background-repeat: no-repeat;
+    background-size: contain;
+    background-position: left top;
+}}
+
+.container > div {{
+    position: absolute;
+    font-family: Arial, "Microsoft YaHei", sans-serif;
+}}
+</style>
+</head>
+<body>
+<div class="container">
+    {children_str}
+</div>
+</body>
+</html>"""
+
+        return html_doc
+
+    def _render_background_with_chrome(self, node: DOMNode, width_pt: float, height_pt: float) -> bytes:
+        """
+        使用 Chrome headless 渲染背景图+文字叠加层。
+
+        这是首选方法，能够获得像素级精确的渲染结果，
+        正确处理所有 CSS 特性（包括 transform、text-align 等）。
+
+        策略：
+        1. 使用原始容器尺寸渲染（保证文字位置正确）
+        2. 渲染完成后，使用 PIL 缩放到目标尺寸
+
+        Args:
+            node: DOM node with background-image
+            width_pt: Target width in points
+            height_pt: Target height in points
+
+        Returns:
+            PNG image data as bytes, or None if failed
+        """
+        try:
+            import io
+            from PIL import Image
+            from html2word.utils.browser_html_converter import get_browser_html_converter
+            from html2word.utils.units import UnitConverter
+
+            # 目标尺寸（像素）
+            target_width_px = int(width_pt * 96 / 72)
+            target_height_px = int(height_pt * 96 / 72)
+
+            # 获取原始容器尺寸（用于渲染）
+            # 文字的 left/top 坐标是基于这个尺寸的
+            original_width_str = node.computed_styles.get('width') or \
+                                (node.inline_styles.get('width') if hasattr(node, 'inline_styles') else None)
+            original_height_str = node.computed_styles.get('height') or \
+                                 (node.inline_styles.get('height') if hasattr(node, 'inline_styles') else None)
+
+            # 获取背景图信息（用于计算尺寸）
+            import re
+            import base64
+            bg_image_css = node.computed_styles.get('background-image', '') or \
+                          (node.inline_styles.get('background-image', '') if hasattr(node, 'inline_styles') else '')
+            bg_width, bg_height = 0, 0
+            match = re.search(r'url\(["\']?data:image/([^;]+);base64,([^)"\'\s]+)', bg_image_css)
+            if match:
+                base64_data = match.group(2)
+                image_data_raw = base64.b64decode(base64_data)
+                bg_img = Image.open(io.BytesIO(image_data_raw))
+                bg_width, bg_height = bg_img.size
+                logger.debug(f"Background image size: {bg_width}x{bg_height}")
+
+            # 确定渲染尺寸
+            # 关键问题：CSS 中 width: 100% 和 height: 573px 不是实际渲染尺寸
+            # 实际渲染尺寸取决于：
+            # 1. 容器在文档中的实际宽度（约 969px，由父元素决定）
+            # 2. background-size: contain 会按比例缩放背景图
+
+            # 解析 CSS 宽度
+            if original_width_str and 'px' in str(original_width_str):
+                render_width_px = int(float(str(original_width_str).replace('px', '')))
+            else:
+                # 宽度是 100% 或 auto，使用典型文档内容宽度
+                # 这个值基于实际浏览器渲染测试确定（约 969px）
+                render_width_px = 969
+                logger.debug(f"Using default document width: {render_width_px}px (CSS width was '{original_width_str}')")
+
+            # 解析 CSS 高度
+            css_height_px = None
+            if original_height_str and 'px' in str(original_height_str):
+                css_height_px = int(float(str(original_height_str).replace('px', '')))
+
+            # 计算实际渲染高度
+            # 当使用 background-size: contain 时，需要考虑：
+            # - 如果背景图比容器宽，会按宽度缩放，高度按比例
+            # - 实际容器高度可能小于 CSS 指定的高度
+            bg_size = node.computed_styles.get('background-size', '') or \
+                     (node.inline_styles.get('background-size', '') if hasattr(node, 'inline_styles') else '')
+
+            if bg_width > 0 and bg_height > 0 and 'contain' in str(bg_size):
+                # 计算 background-size: contain 时的实际背景尺寸
+                bg_aspect = bg_width / bg_height
+                # 如果背景图更宽，按容器宽度缩放
+                scaled_bg_height = int(render_width_px / bg_aspect)
+
+                if css_height_px:
+                    # 使用 CSS 高度和计算高度中的较小值
+                    # 因为 contain 会确保背景图完全显示
+                    render_height_px = min(css_height_px, scaled_bg_height)
+                else:
+                    render_height_px = scaled_bg_height
+
+                logger.debug(f"Calculated height for contain: scaled_bg={scaled_bg_height}, css={css_height_px}, final={render_height_px}")
+            elif css_height_px:
+                render_height_px = css_height_px
+            else:
+                render_height_px = target_height_px
+
+            logger.debug(f"Render size: {render_width_px}x{render_height_px}px, Target size: {target_width_px}x{target_height_px}px")
+
+            # 构建 HTML（使用原始渲染尺寸）
+            html_content = self._build_html_for_screenshot(node, render_width_px, render_height_px)
+
+            # 使用 Chrome 渲染
+            converter = get_browser_html_converter()
+            png_data = converter.convert(html_content, render_width_px, render_height_px)
+
+            if not png_data:
+                logger.debug("Chrome rendering returned None")
+                return None
+
+            # 如果渲染尺寸与目标尺寸不同，使用 PIL 缩放
+            if render_width_px != target_width_px or render_height_px != target_height_px:
+                img = Image.open(io.BytesIO(png_data))
+                img = img.resize((target_width_px, target_height_px), Image.Resampling.LANCZOS)
+                output = io.BytesIO()
+                img.save(output, format='PNG')
+                png_data = output.getvalue()
+                logger.debug(f"Resized from {render_width_px}x{render_height_px} to {target_width_px}x{target_height_px}")
+
+            logger.info(f"Chrome rendered background+text: {target_width_px}x{target_height_px}px, {len(png_data)} bytes")
+            return png_data
+
+        except Exception as e:
+            logger.warning(f"Chrome rendering failed: {e}", exc_info=True)
+            return None
+
     def _composite_background_with_text(self, node: DOMNode, width_pt: float, height_pt: float) -> bytes:
         """
         Composite background image with text overlays using PIL.
 
-        This creates a perfect visual representation by:
+        This is the FALLBACK method when Chrome is not available.
+        Creates a visual representation by:
         1. Decoding the base64 background image
-        2. Drawing text overlays on top with correct positioning
+        2. Drawing text overlays on top with calculated positioning
+
+        Note: This method has known positioning issues due to CSS transform
+        and other complex styles not being handled perfectly.
 
         Args:
             node: DOM node with background-image
@@ -1290,17 +1579,24 @@ class DocumentBuilder:
             actual_width_px, actual_height_px = img.size
             aspect_ratio = actual_width_px / actual_height_px
 
-            # If width is 0 or auto, calculate from height and aspect ratio
-            if width_pt == 0 or width_str.lower() in ('auto', 'none'):
-                if height_pt > 0:
-                    # Use height and maintain aspect ratio
-                    width_pt = height_pt * aspect_ratio
-                else:
-                    # Both auto, use actual dimensions (converted to pt)
-                    width_pt = actual_width_px * 72 / 96
-                    height_pt = actual_height_px * 72 / 96
+            # If width is 0 or auto, use document default width (969px)
+            # This matches the render width used in _render_background_with_chrome
+            # to avoid resize distortion
+            if width_pt == 0 or width_str.lower() in ('auto', 'none', '100%'):
+                # Use typical document content width: 969px = 726.75pt
+                width_pt = 969 * 72 / 96  # Convert px to pt
+                logger.debug(f"Using default document width: {width_pt:.1f}pt (CSS width was '{width_str}')")
 
-                logger.debug(f"Calculated dimensions from aspect ratio: {width_pt:.1f}x{height_pt:.1f}pt (ratio={aspect_ratio:.2f})")
+                # If height is also missing, calculate from background-size: contain behavior
+                if height_pt == 0 or height_str.lower() in ('auto', 'none'):
+                    # With contain, height is based on width and aspect ratio
+                    height_pt = width_pt / aspect_ratio
+                    logger.debug(f"Calculated height from contain: {height_pt:.1f}pt")
+            elif height_pt == 0 or height_str.lower() in ('auto', 'none'):
+                # Width is set, calculate height from aspect ratio
+                height_pt = width_pt / aspect_ratio
+
+            logger.debug(f"Final dimensions for background-image: {width_pt:.1f}x{height_pt:.1f}pt")
 
             # Check if we're in a table cell context
             in_cell = getattr(self, 'in_table_cell', False)
@@ -1321,15 +1617,32 @@ class DocumentBuilder:
                 height_pt = height_pt * scale_factor
                 logger.debug(f"Scaled down to fit {'cell' if in_cell else 'page'}: {width_pt:.1f}x{height_pt:.1f}pt")
 
-            # Try to composite with text overlays first
-            logger.debug("Attempting PIL composite method...")
-            composited_image_data = self._composite_background_with_text(node, width_pt, height_pt)
+            # Check if there are child text elements that need compositing
+            has_text_children = any(
+                child.is_element and hasattr(child, 'get_text_content') and child.get_text_content().strip()
+                for child in node.children
+            )
 
-            if composited_image_data:
-                # Use composited image
-                image_data = composited_image_data
+            if has_text_children:
+                # Try Chrome rendering first (preferred - pixel-perfect CSS support)
+                logger.debug("Attempting Chrome rendering for background+text...")
+                composited_image_data = self._render_background_with_chrome(node, width_pt, height_pt)
+
+                if composited_image_data:
+                    image_data = composited_image_data
+                    logger.info("Using Chrome-rendered image")
+                else:
+                    # Fallback to PIL composite method
+                    logger.debug("Chrome unavailable, falling back to PIL composite...")
+                    composited_image_data = self._composite_background_with_text(node, width_pt, height_pt)
+
+                    if composited_image_data:
+                        image_data = composited_image_data
+                        logger.info("Using PIL-composited image")
+                    else:
+                        logger.warning("Both Chrome and PIL failed, using original background image only")
             else:
-                logger.warning("PIL composite failed, using original background image only")
+                logger.debug("No text children, using original background image")
 
             # Insert image into document
             image_stream = io.BytesIO(image_data)
