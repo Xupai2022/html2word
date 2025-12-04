@@ -1288,16 +1288,18 @@ html, body {{
                 logger.debug("Chrome rendering returned None")
                 return None
 
-            # 如果渲染尺寸与目标尺寸不同，使用 PIL 缩放
-            if render_width_px != target_width_px or render_height_px != target_height_px:
-                img = Image.open(io.BytesIO(png_data))
-                img = img.resize((target_width_px, target_height_px), Image.Resampling.LANCZOS)
-                output = io.BytesIO()
-                img.save(output, format='PNG')
-                png_data = output.getvalue()
-                logger.debug(f"Resized from {render_width_px}x{render_height_px} to {target_width_px}x{target_height_px}")
+            # Chrome 已经生成了高分辨率图片（scale_factor 倍），不要缩小它！
+            # 直接使用高分辨率图片可以保证在 Word 中显示时的清晰度
+            # Word 会根据图片的 DPI 和尺寸自动调整显示
 
-            logger.info(f"Chrome rendered background+text: {target_width_px}x{target_height_px}px, {len(png_data)} bytes")
+            # 获取实际生成的图片尺寸（Chrome 的 scale_factor 倍）
+            img = Image.open(io.BytesIO(png_data))
+            actual_width, actual_height = img.size
+            logger.debug(f"Chrome generated high-res image: {actual_width}x{actual_height}px (from {render_width_px}x{render_height_px}px request)")
+
+            # 不缩放，直接使用高分辨率图片
+            # 图片会以 target 尺寸显示在 Word 中，但保持高分辨率细节
+            logger.info(f"Chrome rendered background+text: {actual_width}x{actual_height}px (display as {target_width_px}x{target_height_px}), {len(png_data)} bytes")
             return png_data
 
         except Exception as e:
