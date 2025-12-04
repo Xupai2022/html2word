@@ -1046,16 +1046,20 @@ class DocumentBuilder:
         children_html = []
         for child in node.children:
             if child.is_element:
-                text_content = child.get_text_content() if hasattr(child, 'get_text_content') else ''
-                if not text_content.strip():
-                    continue
-
-                # 获取元素的 class 属性
+                # 获取元素的 class 属性（先获取，用于判断是否是 comment）
                 child_class = ''
                 if hasattr(child, 'element') and child.element is not None:
                     child_class = child.element.get('class', '')
                 elif hasattr(child, 'attributes'):
                     child_class = child.attributes.get('class', '')
+
+                # 获取文本内容
+                text_content = child.get_text_content() if hasattr(child, 'get_text_content') else ''
+
+                # comment 元素可能没有直接文本，但有子元素（如 <span>），不要跳过
+                is_comment = 'comment' in child_class
+                if not text_content.strip() and not is_comment:
+                    continue
 
                 # 获取样式
                 styles = []
@@ -1080,7 +1084,7 @@ class DocumentBuilder:
                 is_data_text = 'data-text' in child_class
                 is_count_big = 'count__big' in child_class
                 is_count_small = 'count__small' in child_class
-                is_comment = 'comment' in child_class
+                # is_comment 已在前面定义
 
                 # data-text 类的样式：transform 居中
                 if is_data_text:
@@ -1132,10 +1136,45 @@ class DocumentBuilder:
                 styles.append("line-height: 20px")
 
                 style_str = '; '.join(styles)
-                # 转义 HTML 特殊字符
-                import html
-                safe_text = html.escape(text_content.strip())
-                children_html.append(f'<div style="{style_str}">{safe_text}</div>')
+
+                # 对于 comment 类，手动构建带有 name-tag 的 HTML 结构
+                if is_comment:
+                    logger.info(f"Processing comment element with class: {child_class}, text: {text_content[:80]}")
+
+                    # 根据原始HTML结构，有两个标签：
+                    # 1. "Human Expert"
+                    # 2. "GPT AI Analyst"
+                    import html as html_escape
+
+                    # 已知的标签模式（硬编码，基于实际HTML结构）
+                    # 文本内容格式: "Human Expert GPT AI Analyst"
+                    text_clean = text_content.strip()
+
+                    # 构建两个 span 标签
+                    span_html_parts = []
+                    if "Human Expert" in text_clean and "GPT AI Analyst" in text_clean:
+                        # 完整的两个标签
+                        span_html_parts.append('<span>Human Expert</span>')
+                        span_html_parts.append('<span>GPT AI Analyst</span>')
+                    elif "Human Expert" in text_clean:
+                        span_html_parts.append('<span>Human Expert</span>')
+                    elif "GPT AI Analyst" in text_clean:
+                        span_html_parts.append('<span>GPT AI Analyst</span>')
+                    else:
+                        # 回退：使用原始文本
+                        safe_text = html_escape.escape(text_clean)
+                        span_html_parts.append(f'<span>{safe_text}</span>')
+
+                    spans_html = '\n'.join(span_html_parts)
+                    inner_html = f'<p class="name-tag">\n{spans_html}\n</p>'
+
+                    logger.info(f"Built comment HTML with {len(span_html_parts)} span tags: {[s[:50] for s in span_html_parts]}")
+                    children_html.append(f'<div class="comment" style="{style_str}">{inner_html}</div>')
+                else:
+                    # 其他元素：转义 HTML 特殊字符
+                    import html
+                    safe_text = html.escape(text_content.strip())
+                    children_html.append(f'<div style="{style_str}">{safe_text}</div>')
 
         children_str = '\n    '.join(children_html)
 
@@ -1167,6 +1206,33 @@ html, body {{
 .container > div {{
     position: absolute;
     font-family: Arial, "Microsoft YaHei", sans-serif;
+}}
+
+/* 蓝色标签徽章样式 - 用于 Human Expert / GPT AI Analyst 等标签 */
+.name-tag {{
+    margin: 0;
+}}
+
+.name-tag span {{
+    display: inline-block !important;
+    background: #567df5 !important;
+    border-radius: 82px !important;
+    height: 18px !important;
+    font-size: 10.5px !important;
+    font-weight: 400 !important;
+    line-height: 18px !important;
+    color: #fff !important;
+    padding: 0 8px !important;
+    white-space: nowrap !important;
+    margin-bottom: 8px !important;
+}}
+
+.name-tag span svg,
+.name-tag span .icon {{
+    font-size: 12px;
+    margin-right: 4px;
+    display: inline-block;
+    vertical-align: middle;
 }}
 </style>
 </head>
