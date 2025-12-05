@@ -1103,12 +1103,12 @@ class DocumentBuilder:
                     else:
                         styles.append("width: 80px")
 
-                # 字体大小和粗细 - 使用硬编码值，不被 computed_styles 覆盖
+                # 字体大小和粗细 - 使用硬编码值（与 HTML data-v-67638df8 样式一致）
                 if is_count_big:
                     font_size = '18px'
-                    font_weight = '700'
+                    font_weight = '400'  # 正常粗细
                 elif is_count_small:
-                    font_size = '12px'
+                    font_size = '14px'
                     font_weight = '400'
                 elif is_data_text:
                     font_size = '12px'
@@ -1123,12 +1123,13 @@ class DocumentBuilder:
                 styles.append(f"font-size: {font_size}")
                 styles.append(f"font-weight: {font_weight}")
 
-                # 颜色 - 根据 class 名固定，不从 inline_styles 获取
-                # 因为 CSS 解析器可能将其他规则的值错误合并
+                # 颜色 - 根据 class 名固定（与 HTML data-v-67638df8 样式一致）
                 if is_comment:
                     color = '#14161a'
+                elif is_data_text or is_count_big or is_count_small:
+                    # data-text 和 count__big/count__small 使用深蓝色
+                    color = '#0a2366'
                 else:
-                    # data-text 和 count__big 等在深色背景上显示的文字使用白色
                     color = '#fff'
                 styles.append(f"color: {color}")
 

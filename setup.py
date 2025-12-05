@@ -6,8 +6,8 @@ with open("README.md", "r", encoding="utf-8") as fh:
 setup(
     name="html2word",
     version="0.1.0",
-    author="Your Name",
-    author_email="your.email@example.com",
+    author="Xu Pai",
+    author_email="xupai2024@163.com",
     description="A powerful HTML to Word (.docx) converter with CSS style preservation",
     long_description=long_description,
     long_description_content_type="text/markdown",
