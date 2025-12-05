@@ -546,15 +546,24 @@ class ParagraphBuilder:
 
             # Find Chrome
             chrome_paths = [
+                # Windows
                 r"C:\Program Files\Google\Chrome\Application\chrome.exe",
                 r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
                 os.path.expandvars(r"%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe"),
+                # Linux
+                "/usr/bin/google-chrome",
+                "/usr/bin/google-chrome-stable",
+                "/usr/bin/chromium-browser",
+                "/usr/bin/chromium",
+                # Mac
+                "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
             ]
 
             chrome_exe = None
             for path in chrome_paths:
                 if os.path.exists(path):
                     chrome_exe = path
+                    logger.debug(f"Found Chrome at: {path}")
                     break
 
             if not chrome_exe:

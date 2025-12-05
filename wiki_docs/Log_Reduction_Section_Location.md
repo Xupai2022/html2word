@@ -33,17 +33,54 @@
 
 ### 数据文字列表
 
-| 序号 | 内容 | 位置 (top, left) | CSS类 | 宽度 |
-|------|------|------------------|-------|------|
-| 1 | `2K+ logs` | 142px, 204px | `data-text` + `count__small` | 80px |
-| 2 | `5K+ logs` | 162px, 320px | `data-text` + `count__small` | 80px |
-| 3 | `0 logs` | 162px, 436px | `data-text` + `count__small` | 80px |
-| 4 | `0 logs` | 142px, 552px | `data-text` + `count__small` | 80px |
-| 5 | `8,756` | 246px, 376px | `data-text` + `count__big` | 290px |
-| 6 | `17,464` | 328px, 376px | `data-text` + `count__big` | 236px |
-| 7 | `3,000` | 416px, 376px | `data-text` + `count__big` | 170px |
-| 8 | `Human Expert` 标签 | 358px, 510px | `comment` + `name-tag` | 168px+ |
-| 9 | 其他注释文字 | (其他位置) | `comment` | - |
+| 序号 | 内容 | 位置 (top, left) | CSS类 | 宽度 | 说明 |
+|------|------|------------------|-------|------|------|
+| 1 | `2K+ logs` | 142px, 204px | `data-text` + `count__small` | 80px | 小数字统计 |
+| 2 | `5K+ logs` | 162px, 320px | `data-text` + `count__small` | 80px | 小数字统计 |
+| 3 | `0 logs` | 162px, 436px | `data-text` + `count__small` | 80px | 小数字统计 |
+| 4 | `0 logs` | 142px, 552px | `data-text` + `count__small` | 80px | 小数字统计 |
+| 5 | `8,756` | 246px, 376px | `data-text` + `count__big` | 290px | 大数字统计 |
+| 6 | `17,464` | 328px, 376px | `data-text` + `count__big` | 236px | 大数字统计 |
+| 7 | `3,000` | 416px, 376px | `data-text` + `count__big` | 170px | 大数字统计 |
+| 8 | **蓝色标签卡片** | 358px, 510px | `comment` + `name-tag` | 168px+ | **见下方详细说明** |
+| 9 | 其他注释文字 | (其他位置) | `comment` | - | 普通注释 |
+
+## 蓝色标签卡片详细说明
+
+### 位置与样式
+- **绝对定位**: `top: 358px; left: 510px`
+- **最小宽度**: `min-width: 168px`
+- **容器类**: `comment`
+- **内部结构**: `<p class="name-tag"><span>...</span><span>...</span></p>`
+
+### 标签内容
+原始HTML包含两个带蓝色胶囊形背景的标签：
+1. **Human Expert** - 人工专家标签
+2. **GPT AI Analyst** - AI分析师标签
+
+### CSS样式规格
+```css
+.name-tag span {
+    display: inline-block;
+    background: #567df5;          /* 蓝色背景 RGB(86, 125, 245) */
+    border-radius: 82px;          /* 胶囊形圆角 */
+    height: 18px;
+    font-size: 10.5px;
+    line-height: 18px;
+    color: #fff;                  /* 白色文字 */
+    padding: 0 8px;
+    white-space: nowrap;
+    margin-bottom: 8px;
+}
+```
+
+### 视觉效果
+- **形状**: 胶囊形（超大圆角）
+- **背景色**: #567df5 (蓝色)
+- **文字颜色**: #fff (白色)
+- **内边距**: 左右各8px
+- **高度**: 18px
+- **间距**: 多个标签之间有8px底部间距
 
 ### HTML 示例
 
@@ -144,13 +181,42 @@ if match:
 2. **文字叠加**: 使用绝对定位 (`position: absolute`) 将文字精确放置在背景图上
 3. **响应式**: 容器宽度为 100%，高度固定 573px
 4. **数据驱动**: 数字和标签内容可能由前端框架动态生成
+5. **蓝色标签**: 使用CSS实现胶囊形背景，需要保留HTML结构才能正确渲染
 
-## 相关任务
+## 搜索蓝色标签
 
-- **转换为 Word**: 需要将背景图和文字合成为单一图片
-- **截图方案**: 可以使用 Chrome 渲染并截图
-- **图片合成**: 使用 PIL/Pillow 将文字绘制到背景图上
+### 查找comment元素
+```bash
+grep -o '<div class="comment"[^>]*>.*</div>' oversear_monthly_report_part1.html
+```
+
+### 提取name-tag内容
+```bash
+grep -o '<p class="name-tag"[^>]*>.*</p>' oversear_monthly_report_part1.html
+```
+
+### Python提取蓝色标签
+```python
+import re
+from bs4 import BeautifulSoup
+
+with open('oversear_monthly_report_part1.html', 'r', encoding='utf-8') as f:
+    soup = BeautifulSoup(f, 'lxml')
+
+# 查找所有name-tag元素
+name_tags = soup.find_all('p', class_='name-tag')
+for tag in name_tags:
+    spans = tag.find_all('span')
+    labels = [span.get_text(strip=True) for span in spans]
+    print(f"找到标签: {labels}")
+```
+
+## 相关文档
+
+- [Blue_Tag_Badge_Style_Analysis.md](Blue_Tag_Badge_Style_Analysis.md) - 蓝色标签样式分析和修复方案
+- [BLUE_BADGE_FIX_SUMMARY.md](../BLUE_BADGE_FIX_SUMMARY.md) - 蓝色标签修复总结
 
 ## 更新记录
 
-- **2025-12-04**: 初次创建，记录 Log Reduction Section 的位置信息
+- **2025-12-04 (下午)**: 添加蓝色标签卡片详细说明和转换技术
+- **2025-12-04 (上午)**: 初次创建，记录 Log Reduction Section 的位置信息

@@ -7,7 +7,7 @@ Main coordinator for building Word documents from DOM trees.
 import logging
 import math
 import re
-from typing import Optional
+from typing import Optional, List
 from docx import Document
 
 from html2word.parser.dom_tree import DOMNode, DOMTree
@@ -1137,39 +1137,78 @@ class DocumentBuilder:
 
                 style_str = '; '.join(styles)
 
-                # 对于 comment 类，手动构建带有 name-tag 的 HTML 结构
-                if is_comment:
-                    logger.info(f"Processing comment element with class: {child_class}, text: {text_content[:80]}")
+                # 自动检测是否包含徽章/胶囊样式的元素
+                # 基于 CSS 样式特征（border-radius + background）而不是硬编码类名
+                badges = self._find_badge_elements(child)
 
-                    # 根据原始HTML结构，有两个标签：
-                    # 1. "Human Expert"
-                    # 2. "GPT AI Analyst"
+                if badges:
+                    # 找到徽章元素，使用自动提取的样式
+                    logger.info(f"Found {len(badges)} badge elements in child with class: {child_class}")
+
                     import html as html_escape
 
-                    # 已知的标签模式（硬编码，基于实际HTML结构）
-                    # 文本内容格式: "Human Expert GPT AI Analyst"
-                    text_clean = text_content.strip()
-
-                    # 构建两个 span 标签
                     span_html_parts = []
-                    if "Human Expert" in text_clean and "GPT AI Analyst" in text_clean:
-                        # 完整的两个标签
-                        span_html_parts.append('<span>Human Expert</span>')
-                        span_html_parts.append('<span>GPT AI Analyst</span>')
-                    elif "Human Expert" in text_clean:
-                        span_html_parts.append('<span>Human Expert</span>')
-                    elif "GPT AI Analyst" in text_clean:
-                        span_html_parts.append('<span>GPT AI Analyst</span>')
+                    badge_css_rules = []  # 收集徽章 CSS 规则
+
+                    for idx, badge in enumerate(badges):
+                        safe_text = html_escape.escape(badge['text'])
+                        badge_class = f'badge-{idx}'
+                        span_html_parts.append(f'<span class="{badge_class}">{safe_text}</span>')
+
+                        # 从 computed_styles 构建 CSS
+                        badge_styles = badge['styles']
+                        if badge_styles:
+                            css_rule = self._build_badge_css(badge_styles, badge_class)
+                            if css_rule:
+                                badge_css_rules.append(css_rule)
+                            logger.info(f"Badge '{safe_text}' styles: {badge_styles}")
+
+                    if span_html_parts:
+                        spans_html = '\n'.join(span_html_parts)
+                        inner_html = f'<div class="badge-container">\n{spans_html}\n</div>'
+                        logger.info(f"Built badge HTML with {len(span_html_parts)} spans (auto-detected by CSS)")
+
+                        # 将徽章 CSS 规则附加到子元素（稍后合并到全局 CSS）
+                        if not hasattr(self, '_badge_css_rules'):
+                            self._badge_css_rules = []
+                        self._badge_css_rules.extend(badge_css_rules)
+
+                        children_html.append(f'<div class="comment" style="{style_str}">{inner_html}</div>')
                     else:
                         # 回退：使用原始文本
+                        text_clean = text_content.strip()
                         safe_text = html_escape.escape(text_clean)
-                        span_html_parts.append(f'<span>{safe_text}</span>')
+                        children_html.append(f'<div style="{style_str}">{safe_text}</div>')
 
-                    spans_html = '\n'.join(span_html_parts)
-                    inner_html = f'<p class="name-tag">\n{spans_html}\n</p>'
+                elif is_comment:
+                    # 兼容旧逻辑：如果有 comment 类但没检测到徽章，仍尝试提取 name-tag
+                    logger.info(f"Processing comment element (fallback) with class: {child_class}")
 
-                    logger.info(f"Built comment HTML with {len(span_html_parts)} span tags: {[s[:50] for s in span_html_parts]}")
-                    children_html.append(f'<div class="comment" style="{style_str}">{inner_html}</div>')
+                    import html as html_escape
+
+                    span_texts = self._extract_name_tag_spans(child)
+
+                    if span_texts:
+                        span_html_parts = []
+                        for span_text in span_texts:
+                            safe_text = html_escape.escape(span_text.strip())
+                            if safe_text:
+                                span_html_parts.append(f'<span>{safe_text}</span>')
+
+                        if span_html_parts:
+                            spans_html = '\n'.join(span_html_parts)
+                            inner_html = f'<p class="name-tag">\n{spans_html}\n</p>'
+                            children_html.append(f'<div class="comment" style="{style_str}">{inner_html}</div>')
+                        else:
+                            text_clean = text_content.strip()
+                            safe_text = html_escape.escape(text_clean)
+                            inner_html = f'<p class="name-tag">\n<span>{safe_text}</span>\n</p>'
+                            children_html.append(f'<div class="comment" style="{style_str}">{inner_html}</div>')
+                    else:
+                        text_clean = text_content.strip()
+                        safe_text = html_escape.escape(text_clean)
+                        inner_html = f'<p class="name-tag">\n<span>{safe_text}</span>\n</p>'
+                        children_html.append(f'<div class="comment" style="{style_str}">{inner_html}</div>')
                 else:
                     # 其他元素：转义 HTML 特殊字符
                     import html
@@ -1177,6 +1216,14 @@ class DocumentBuilder:
                     children_html.append(f'<div style="{style_str}">{safe_text}</div>')
 
         children_str = '\n    '.join(children_html)
+
+        # 构建自动检测的徽章 CSS 规则
+        auto_badge_css = ''
+        if hasattr(self, '_badge_css_rules') and self._badge_css_rules:
+            auto_badge_css = '\n\n/* 自动检测的徽章样式（基于 CSS 特征） */\n'
+            auto_badge_css += '\n'.join(self._badge_css_rules)
+            # 清空已使用的规则
+            self._badge_css_rules = []
 
         # 构建完整 HTML
         html_doc = f"""<!DOCTYPE html>
@@ -1208,7 +1255,15 @@ html, body {{
     font-family: Arial, "Microsoft YaHei", sans-serif;
 }}
 
-/* 蓝色标签徽章样式 - 用于 Human Expert / GPT AI Analyst 等标签 */
+/* 自动检测的徽章容器样式 */
+.badge-container {{
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 8px;
+}}
+
+/* 回退样式：蓝色标签徽章 - 用于未能自动检测的情况 */
 .name-tag {{
     margin: 0;
 }}
@@ -1233,7 +1288,7 @@ html, body {{
     margin-right: 4px;
     display: inline-block;
     vertical-align: middle;
-}}
+}}{auto_badge_css}
 </style>
 </head>
 <body>
@@ -1244,6 +1299,278 @@ html, body {{
 </html>"""
 
         return html_doc
+
+    def _extract_name_tag_spans(self, node: DOMNode) -> List[str]:
+        """
+        从 DOM 节点中提取 name-tag 下的 span 元素文本内容。
+
+        自动遍历 DOM 结构，查找 p.name-tag 下的所有 span 元素，
+        提取每个 span 的文本内容（不包括 SVG 等子元素）。
+
+        Args:
+            node: comment 类的 DOM 节点
+
+        Returns:
+            span 元素的文本内容列表
+        """
+        span_texts = []
+
+        def find_spans_in_name_tag(n: DOMNode):
+            """递归查找 name-tag 下的 span 元素"""
+            if not n.is_element:
+                return
+
+            # 检查是否是 name-tag
+            node_class = n.attributes.get('class', '')
+            if isinstance(node_class, list):
+                node_class = ' '.join(node_class)
+
+            is_name_tag = 'name-tag' in str(node_class)
+
+            if is_name_tag:
+                # 在 name-tag 内查找 span 元素
+                for child in n.children:
+                    if child.is_element and child.tag == 'span':
+                        # 提取 span 的纯文本内容（排除 SVG 等）
+                        text = self._get_text_without_svg(child)
+                        if text.strip():
+                            span_texts.append(text.strip())
+            else:
+                # 继续递归查找
+                for child in n.children:
+                    find_spans_in_name_tag(child)
+
+        find_spans_in_name_tag(node)
+        return span_texts
+
+    def _get_text_without_svg(self, node: DOMNode) -> str:
+        """
+        获取节点的文本内容，排除 SVG 等非文本元素。
+
+        Args:
+            node: DOM 节点
+
+        Returns:
+            纯文本内容
+        """
+        if node.is_text:
+            return node.text or ''
+
+        if not node.is_element:
+            return ''
+
+        # 跳过 SVG 元素
+        if node.tag == 'svg':
+            return ''
+
+        # 递归获取子节点文本
+        text_parts = []
+        for child in node.children:
+            text_parts.append(self._get_text_without_svg(child))
+
+        return ''.join(text_parts)
+
+    def _is_badge_element(self, node: DOMNode, parent_class: str = '', debug: bool = False) -> bool:
+        """
+        检测元素是否具有胶囊/徽章样式特征。
+
+        由于 computed_styles 不包含嵌套 CSS 选择器的样式（如 .name-tag span），
+        采用 DOM 结构检测 + CSS 规则检测双重策略：
+
+        策略 1 - DOM 结构模式：
+        - 检测 span 元素，其父元素具有特定类名（如 name-tag, badge, tag 等）
+
+        策略 2 - CSS 样式检测（作为补充）：
+        - border-radius >= 15px（胶囊形）
+        - 有非透明的 background 或 background-color
+
+        Args:
+            node: DOM 节点
+            parent_class: 父元素的 class 名称
+            debug: 是否输出调试日志
+
+        Returns:
+            True 如果是徽章元素
+        """
+        if not node.is_element:
+            return False
+
+        # 策略 1：基于父元素类名的 DOM 结构检测
+        # 常见的徽章容器类名模式
+        badge_parent_patterns = [
+            'name-tag', 'badge', 'tag', 'label', 'chip',
+            'pill', 'capsule', 'token', 'category'
+        ]
+
+        if node.tag == 'span' and parent_class:
+            parent_class_str = str(parent_class).lower()
+            for pattern in badge_parent_patterns:
+                if pattern in parent_class_str:
+                    if debug:
+                        logger.debug(f"Badge detected by DOM pattern: span inside '{pattern}' parent")
+                    return True
+
+        # 策略 2：基于 computed_styles 的样式检测（作为补充）
+        styles = node.computed_styles or {}
+
+        # 检查 border-radius
+        border_radius = styles.get('border-radius', '')
+        has_large_radius = False
+        if border_radius:
+            import re
+            match = re.search(r'(\d+(?:\.\d+)?)(px|%|em|rem)?', str(border_radius))
+            if match:
+                value = float(match.group(1))
+                unit = match.group(2) or 'px'
+                if unit == 'px' and value >= 15:
+                    has_large_radius = True
+                elif unit == '%' and value >= 30:
+                    has_large_radius = True
+                elif unit in ('em', 'rem') and value >= 1:
+                    has_large_radius = True
+
+        # 检查背景色
+        background = styles.get('background', '')
+        background_color = styles.get('background-color', '')
+        has_background = bool(background or background_color)
+        # 排除透明和白色背景
+        if background_color in ('transparent', 'rgba(0, 0, 0, 0)', 'rgba(0,0,0,0)', '#fff', '#ffffff', '#FFFFFF', '#FFF'):
+            has_background = False
+
+        if has_large_radius and has_background:
+            if debug:
+                logger.debug(f"Badge detected by CSS: border-radius={border_radius}, background-color={background_color}")
+            return True
+
+        return False
+
+    def _find_badge_elements(self, node: DOMNode) -> List[dict]:
+        """
+        递归查找节点中所有具有徽章样式特征的元素。
+
+        返回每个徽章元素的信息，包括：
+        - node: DOM 节点
+        - text: 文本内容
+        - styles: 从 computed_styles 提取的样式
+
+        Args:
+            node: DOM 节点
+
+        Returns:
+            徽章元素信息列表
+        """
+        badges = []
+
+        def find_badges(n: DOMNode, parent_class: str = '', depth: int = 0):
+            if not n.is_element:
+                return
+
+            # 获取当前元素的 class
+            node_class = n.attributes.get('class', '')
+            if isinstance(node_class, list):
+                node_class_str = ' '.join(node_class)
+            else:
+                node_class_str = str(node_class) if node_class else ''
+
+            # 检查当前元素是否是徽章（传递父元素的 class）
+            if self._is_badge_element(n, parent_class=parent_class, debug=False):
+                text = self._get_text_without_svg(n)
+                if text.strip():
+                    logger.debug(f"Badge detected: tag={n.tag}, text='{text.strip()}', parent_class='{parent_class}'")
+                    badges.append({
+                        'node': n,
+                        'text': text.strip(),
+                        'styles': self._extract_badge_styles(n)
+                    })
+                # 找到徽章后不再递归（避免重复）
+                return
+
+            # 递归查找子元素，传递当前元素的 class 作为父 class
+            for child in n.children:
+                find_badges(child, parent_class=node_class_str, depth=depth + 1)
+
+        find_badges(node)
+        return badges
+
+    def _extract_badge_styles(self, node: DOMNode) -> dict:
+        """
+        从节点的 computed_styles 中提取徽章相关的样式。
+
+        由于 computed_styles 可能不包含 CSS 选择器定义的样式，
+        当检测到无效样式时提供合理的默认值。
+
+        Args:
+            node: DOM 节点
+
+        Returns:
+            样式字典，包含 background, border-radius, color, font-size 等
+        """
+        styles = node.computed_styles or {}
+        badge_styles = {}
+
+        # 提取关键样式
+        style_keys = [
+            'background', 'background-color',
+            'border-radius',
+            'color',
+            'font-size', 'font-weight',
+            'line-height',
+            'padding', 'padding-left', 'padding-right', 'padding-top', 'padding-bottom',
+            'height',
+            'display',
+            'white-space'
+        ]
+
+        for key in style_keys:
+            if key in styles and styles[key]:
+                badge_styles[key] = styles[key]
+
+        # 检测 computed_styles 是否有效
+        # 如果背景色是白色或透明，说明 CSS 选择器样式未被正确解析
+        bg_color = badge_styles.get('background-color', '')
+        invalid_backgrounds = ['#fff', '#ffffff', '#FFFFFF', '#FFF', 'transparent', 'rgba(0, 0, 0, 0)']
+
+        if not bg_color or bg_color in invalid_backgrounds:
+            # 使用默认徽章样式（常见的胶囊形徽章）
+            logger.debug(f"Badge has invalid background-color '{bg_color}', using defaults")
+            badge_styles = {
+                'display': 'inline-block',
+                'background': '#567df5',  # 默认蓝色
+                'border-radius': '82px',   # 胶囊形
+                'height': '18px',
+                'font-size': '10.5px',
+                'font-weight': '400',
+                'line-height': '18px',
+                'color': '#fff',
+                'padding': '0 8px',
+                'white-space': 'nowrap',
+                'margin-bottom': '8px'
+            }
+
+        return badge_styles
+
+    def _build_badge_css(self, badge_styles: dict, class_name: str = 'badge') -> str:
+        """
+        根据提取的样式构建 CSS 规则。
+
+        Args:
+            badge_styles: 从 computed_styles 提取的样式
+            class_name: CSS 类名
+
+        Returns:
+            CSS 规则字符串
+        """
+        if not badge_styles:
+            return ''
+
+        style_parts = []
+        for prop, value in badge_styles.items():
+            if value:
+                style_parts.append(f"    {prop}: {value} !important;")
+
+        if style_parts:
+            return f".{class_name} {{\n" + "\n".join(style_parts) + "\n}"
+        return ''
 
     def _render_background_with_chrome(self, node: DOMNode, width_pt: float, height_pt: float) -> bytes:
         """
