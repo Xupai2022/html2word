@@ -474,7 +474,8 @@ def _preprocess_svg_nodes(self, root_node):
     svg_list = [(node.content, width, height) for node in svg_nodes]
 
     # 批量并行转换，结果自动缓存
-    self.svg_converter.convert_batch(svg_list, max_workers=4)
+    # Windows上Chrome进程开销较大，并发数降低到2以保证稳定性
+    self.svg_converter.convert_batch(svg_list, max_workers=2)
 ```
 
 ### 4. Element UI 表格预索引

@@ -6,8 +6,8 @@ while preserving CSS styles, layout, tables, images, and more.
 """
 
 __version__ = "0.1.0"
-__author__ = "Your Name"
-__email__ = "your.email@example.com"
+__author__ = "Xu Pai"
+__email__ = "xupai2024@163.com"
 
 from html2word.converter import HTML2WordConverter
 
