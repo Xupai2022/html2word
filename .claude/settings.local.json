@@ -61,7 +61,9 @@
       "Bash(HTML2WORD_PARALLEL=false python:*)",
       "Bash(git restore:*)",
       "Bash(dir:*)",
-      "Bash(git checkout:*)"
+      "Bash(git checkout:*)",
+      "Bash(pip install:*)",
+      "Bash(html2word:*)"
     ],
     "deny": [],
     "ask": []
