@@ -28,7 +28,7 @@
 # 1. 获取项目代码（从 Git 克隆或解压缩包）
 cd html2word
 
-# 2. 本地安装（推荐）
+# 2. 本地安装
 pip install -e .
 
 # 这会自动：
@@ -47,7 +47,7 @@ python -m html2word.cli input.html -o output.docx
 
 ### 2. 使用方式
 
-#### 命令行使用（推荐）
+#### 命令行使用
 
 安装后，可以直接使用 `html2word` 命令：
 
@@ -55,17 +55,9 @@ python -m html2word.cli input.html -o output.docx
 # 基本用法
 html2word input.html -o output.docx
 
-# 指定资源基础路径（用于解析相对路径的图片等）
-html2word input.html -o output.docx --base-path /path/to/resources
-
 # 开启调试日志
 html2word input.html -o output.docx --log-level DEBUG
 
-# 查看帮助
-html2word --help
-
-# 查看版本
-html2word --version
 ```
 
 #### Python 代码使用
@@ -73,7 +65,7 @@ html2word --version
 ```python
 from html2word import HTML2WordConverter
 
-# 创建转换器实例
+# 创建转换器实例，base_path可选暂时用不到
 converter = HTML2WordConverter(base_path='/path/to/html/directory')
 
 # 方式一：转换 HTML 文件
@@ -97,87 +89,7 @@ html_content = """
 converter.convert_string(html_content, 'output.docx')
 ```
 
-## 📖 详细示例
 
-### 示例 1：基本 HTML 转换
-
-```python
-from html2word import HTML2WordConverter
-
-html = """
-<html>
-<head>
-    <style>
-        .header { font-size: 20pt; color: #0066cc; font-weight: bold; }
-        .content { font-size: 12pt; line-height: 1.6; text-align: justify; }
-    </style>
-</head>
-<body>
-    <div class="header">项目报告</div>
-    <div class="content">
-        这是一份详细的项目报告，包含了<strong>重要信息</strong>和数据分析。
-    </div>
-</body>
-</html>
-"""
-
-converter = HTML2WordConverter()
-converter.convert_string(html, 'report.docx')
-```
-
-### 示例 2：表格转换
-
-```python
-html = """
-<table style="border: 1px solid black; width: 100%;">
-    <thead>
-        <tr style="background-color: #0066cc; color: white;">
-            <th>姓名</th>
-            <th>年龄</th>
-            <th>职位</th>
-        </tr>
-    </thead>
-    <tbody>
-        <tr>
-            <td>张三</td>
-            <td>28</td>
-            <td>工程师</td>
-        </tr>
-        <tr>
-            <td>李四</td>
-            <td>32</td>
-            <td>项目经理</td>
-        </tr>
-    </tbody>
-</table>
-"""
-
-converter = HTML2WordConverter()
-converter.convert_string(html, 'table.docx')
-```
-
-### 示例 3：包含图片的文档
-
-```python
-from html2word import HTML2WordConverter
-
-# 假设你的 HTML 文件在 /home/user/documents/report.html
-# 图片路径为 /home/user/documents/images/chart.png
-
-converter = HTML2WordConverter(base_path='/home/user/documents')
-converter.convert_file('report.html', 'output.docx')
-```
-
-HTML 内容示例：
-```html
-<html>
-<body>
-    <h1>数据分析报告</h1>
-    <img src="images/chart.png" alt="数据图表" style="width: 600px;">
-    <p>如上图所示，本季度业绩增长显著。</p>
-</body>
-</html>
-```
 
 ## 🔧 配置说明
 
@@ -189,11 +101,14 @@ HTML 内容示例：
 # 设置日志级别
 export HTML2WORD_LOG_LEVEL=DEBUG
 
-# 禁用并行处理（调试时使用）
-export HTML2WORD_PARALLEL=false
+# 并行处理（默认）
+export HTML2WORD_PARALLEL=true
 
-# 设置截图缩放比例（提高清晰度）
+# 设置截图缩放比例提高清晰度（默认）
 export HTML2WORD_SCREENSHOT_SCALE=2
+
+# 并行worker数量（默认）
+export HTML2WORD_WORKERS=4
 ```
 
 ### 配置文件
@@ -240,74 +155,7 @@ html2word/
 └── README.md                    # 本文档
 ```
 
-## 🐛 故障排查
 
-### 问题 1: 图片无法加载
-
-**原因**: 相对路径解析错误
-
-**解决方案**:
-```bash
-# 使用 --base-path 指定 HTML 文件所在目录
-html2word input.html -o output.docx --base-path /absolute/path/to/html/directory
-```
-
-### 问题 2: 样式未正确应用
-
-**原因**: CSS 选择器不支持或样式冲突
-
-**解决方案**:
-```bash
-# 开启 DEBUG 日志查看详细信息
-html2word input.html -o output.docx --log-level DEBUG
-```
-
-### 问题 3: 中文字体显示异常
-
-**原因**: Word 默认字体不支持中文
-
-**解决方案**: 在 HTML 中明确指定中文字体：
-```html
-<style>
-body { font-family: '宋体', 'SimSun', 'Microsoft YaHei', sans-serif; }
-</style>
-```
-
-## 🔍 高级功能
-
-### 自定义样式映射
-
-```python
-from html2word import HTML2WordConverter
-
-converter = HTML2WordConverter()
-
-# 转换前自定义处理
-html = """<div class="custom-box">内容</div>"""
-converter.convert_string(html, 'output.docx')
-```
-
-### 批量转换
-
-```python
-import os
-from html2word import HTML2WordConverter
-
-converter = HTML2WordConverter()
-
-# 批量转换目录下的所有 HTML 文件
-html_dir = '/path/to/html/files'
-output_dir = '/path/to/output'
-
-for filename in os.listdir(html_dir):
-    if filename.endswith('.html'):
-        input_path = os.path.join(html_dir, filename)
-        output_path = os.path.join(output_dir, filename.replace('.html', '.docx'))
-
-        print(f'Converting {filename}...')
-        converter.convert_file(input_path, output_path)
-        print(f'✓ Saved to {output_path}')
-```
 
 ## 🤝 贡献指南
 
